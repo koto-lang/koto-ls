@@ -1,0 +1,9 @@
+[package]
+name = "koto-ls"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.82"
+tokio = { version = "1.37.0", features = ["full"] }
+tower-lsp = "0.20.0"
