@@ -1,73 +1,61 @@
+use crate::source_info::SourceInfo;
+use crate::utils::{default, koto_span_to_lsp_range};
+use koto::bytecode::Compiler;
+use koto::parser::{Parser, Span};
+use std::collections::HashMap;
 use std::sync::Arc;
-
-use koto::Koto;
-use parking_lot::Mutex;
+use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 pub struct KotoServer {
     client: Client,
-    koto: Arc<Mutex<Koto>>,
+    source_info: Arc<Mutex<HashMap<Url, SourceInfo>>>,
 }
 
 impl KotoServer {
     pub fn new(client: Client) -> Self {
         Self {
             client,
-            koto: Arc::new(Mutex::new(Koto::default())),
+            source_info: Arc::new(Mutex::new(HashMap::default())),
         }
     }
 
     async fn compile(&self, script: &str, uri: Url, version: i32) {
-        let result = self.koto.lock().set_script_path(uri.to_file_path().ok());
-        if let Err(e) = result {
-            self.client.log_message(MessageType::ERROR, e).await;
+        self.source_info.lock().await.remove(&uri);
+        let ast = match Parser::parse(script) {
+            Ok(ast) => ast,
+            Err(e) => {
+                self.report_koto_error(e.span, e.error.to_string(), uri, version)
+                    .await;
+                return;
+            }
+        };
+        if let Err(e) = Compiler::compile(&ast, default()) {
+            self.report_koto_error(e.span, e.to_string(), uri, version)
+                .await;
             return;
         }
-        let result = self.koto.lock().compile(script);
-        match result {
-            Ok(_) => {
-                self.client
-                    .publish_diagnostics(uri, vec![], Some(version))
-                    .await;
-            }
-            Err(koto::Error {
-                error: koto::ErrorKind::CompileError(e),
-                ..
-            }) => {
-                if let Some(source) = e.source {
-                    let diagnostics = vec![Diagnostic {
-                        range: koto_span_to_lsp_range(source.span),
-                        message: e.error.to_string(),
-                        ..Default::default()
-                    }];
-
-                    self.client
-                        .log_message(MessageType::INFO, "Error, sending diagnostics")
-                        .await;
-                    self.client
-                        .publish_diagnostics(uri, diagnostics, Some(version))
-                        .await;
-                }
-            }
-            Err(e) => {
-                self.client.log_message(MessageType::ERROR, e).await;
-            }
-        }
+        self.client
+            .publish_diagnostics(uri.clone(), vec![], Some(version))
+            .await;
+        self.source_info
+            .lock()
+            .await
+            .insert(uri, SourceInfo::from_ast(&ast));
     }
-}
 
-fn koto_span_to_lsp_range(span: koto::parser::Span) -> Range {
-    Range {
-        start: Position {
-            line: span.start.line - 1,
-            character: span.start.column - 1,
-        },
-        end: Position {
-            line: span.end.line - 1,
-            character: span.end.column - 1,
-        },
+    async fn report_koto_error(&self, span: Span, message: String, uri: Url, version: i32) {
+        let diagnostics = vec![Diagnostic {
+            range: koto_span_to_lsp_range(span),
+            message,
+            ..default()
+        }];
+
+        self.client
+            .publish_diagnostics(uri, diagnostics, Some(version))
+            .await;
     }
 }
 
@@ -80,7 +68,8 @@ impl LanguageServer for KotoServer {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
-                ..ServerCapabilities::default()
+                definition_provider: Some(OneOf::Left(true)),
+                ..default()
             },
         })
     }
@@ -116,5 +105,43 @@ impl LanguageServer for KotoServer {
                 .log_message(MessageType::INFO, "No changes?")
                 .await;
         }
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let result = self
+            .source_info
+            .lock()
+            .await
+            .get(&uri)
+            .and_then(|info| info.get_reference(position))
+            .map(|reference| {
+                let location = Location {
+                    uri: uri.clone(),
+                    range: reference.definition,
+                };
+                GotoDefinitionResponse::Scalar(location)
+            });
+
+        if result.is_none() {
+            self.client
+                .log_message(
+                    MessageType::INFO,
+                    format!(
+                        "source_info: {:?}",
+                        self.source_info.lock().await.get(&uri).unwrap()
+                    ),
+                )
+                .await;
+            self.client
+                .log_message(MessageType::INFO, "No definition found")
+                .await;
+        }
+
+        Ok(result)
     }
 }
