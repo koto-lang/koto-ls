@@ -69,6 +69,7 @@ impl LanguageServer for KotoServer {
                     TextDocumentSyncKind::FULL,
                 )),
                 definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 ..default()
             },
         })
@@ -129,16 +130,36 @@ impl LanguageServer for KotoServer {
 
         if result.is_none() {
             self.client
-                .log_message(
-                    MessageType::INFO,
-                    format!(
-                        "source_info: {:?}",
-                        self.source_info.lock().await.get(&uri).unwrap()
-                    ),
-                )
-                .await;
-            self.client
                 .log_message(MessageType::INFO, "No definition found")
+                .await;
+        }
+
+        Ok(result)
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+
+        let result = self
+            .source_info
+            .lock()
+            .await
+            .get(&uri)
+            .and_then(|info| info.find_references(position, include_declaration))
+            .map(|references| {
+                references
+                    .map(|reference| Location {
+                        uri: uri.clone(),
+                        range: reference,
+                    })
+                    .collect()
+            });
+
+        if result.is_none() {
+            self.client
+                .log_message(MessageType::INFO, "No references found")
                 .await;
         }
 

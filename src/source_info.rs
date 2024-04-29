@@ -13,34 +13,91 @@ use crate::utils::koto_span_to_lsp_range;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourceInfo {
-    // A vec of all known references, sorted by start position
+    // A vec of all definitions, sorted by start position
+    definitions: Vec<Definition>,
+    // A vec of all references, sorted by start position
     references: Vec<Reference>,
 }
 
 impl SourceInfo {
     pub fn from_ast(ast: &Ast) -> Self {
-        let builder = SourceInfoBuilder::from_ast(ast);
-        Self {
-            references: builder.references,
-        }
+        SourceInfoBuilder::from_ast(ast).build()
     }
 
     pub fn get_reference(&self, position: Position) -> Option<&Reference> {
-        if let Ok(i) = self.references.binary_search_by(|reference| {
-            let range = &reference.range;
-            if position < range.start {
-                Ordering::Greater
-            } else if position >= range.end {
-                Ordering::Less
-            } else {
-                Ordering::Equal
-            }
-        }) {
+        if let Ok(i) = self
+            .references
+            .binary_search_by(|reference| cmp_position_to_range(position, &reference.range))
+        {
             Some(&self.references[i])
         } else {
             None
         }
     }
+
+    pub fn find_references(
+        &self,
+        position: Position,
+        include_definition: bool,
+    ) -> Option<FindReferencesIter> {
+        self.definitions
+            // Find the definition at the given position
+            .binary_search_by(|definition| cmp_position_to_range(position, &definition.range))
+            .ok()
+            .map(|i| self.definitions[i].range)
+            // If no definition was found, what about a reference?
+            .or_else(|| {
+                self.get_reference(position)
+                    .map(|reference| reference.definition)
+            })
+            // Make an output iterator if a definition has been found
+            .map(|definition| FindReferencesIter {
+                definition,
+                references: self.references.iter(),
+                include_definition,
+            })
+    }
+}
+
+#[derive(Clone)]
+pub struct FindReferencesIter<'a> {
+    definition: Range,
+    references: std::slice::Iter<'a, Reference>,
+    include_definition: bool,
+}
+
+impl<'a> Iterator for FindReferencesIter<'a> {
+    type Item = Range;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.include_definition {
+            self.include_definition = false;
+            Some(self.definition)
+        } else {
+            for reference in self.references.by_ref() {
+                if reference.definition == self.definition {
+                    return Some(reference.range);
+                }
+            }
+            None
+        }
+    }
+}
+
+fn cmp_position_to_range(position: Position, range: &Range) -> Ordering {
+    if position < range.start {
+        Ordering::Greater
+    } else if position >= range.end {
+        Ordering::Less
+    } else {
+        Ordering::Equal
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Definition {
+    range: Range,
+    id: ConstantIndex,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -53,11 +110,12 @@ pub struct Reference {
 #[derive(Default)]
 struct SourceInfoBuilder {
     frames: Vec<Frame>,
+    definitions: Vec<Definition>,
     references: Vec<Reference>,
 }
 
 impl SourceInfoBuilder {
-    pub fn from_ast(ast: &Ast) -> Self {
+    fn from_ast(ast: &Ast) -> Self {
         let mut result = Self::default();
 
         if let Some(entry_point) = ast.entry_point() {
@@ -65,6 +123,21 @@ impl SourceInfoBuilder {
         };
 
         result
+    }
+
+    fn build(mut self) -> SourceInfo {
+        // Sort the definitions, they get added in pop_frame so they aren't in order
+        self.definitions
+            .sort_by_key(|definition| definition.range.start);
+        // References are already sorted
+        debug_assert!(is_sorted::IsSorted::is_sorted_by_key(
+            &mut self.references.iter(),
+            |reference| reference.range.start
+        ));
+        SourceInfo {
+            definitions: self.definitions,
+            references: self.references,
+        }
     }
 
     fn visit_node(&mut self, node_index: AstIndex, ast: &Ast, id_is_definition: bool) {
@@ -155,16 +228,15 @@ impl SourceInfoBuilder {
                 }
             }
             Node::MainBlock { body, local_count } => {
-                self.frames.push(Frame::with_capacity(*local_count));
+                self.push_frame(*local_count);
                 self.visit_nested(body, ast, false);
-                self.frames.pop();
+                self.pop_frame();
             }
             Node::Function(info) => {
-                self.frames
-                    .push(Frame::with_capacity(info.local_count + info.args.len()));
+                self.push_frame(info.local_count + info.args.len());
                 self.visit_nested(&info.args, ast, true);
                 self.visit_node(info.body, ast, false);
-                self.frames.pop();
+                self.pop_frame();
             }
             Node::Import { from, items } => {
                 for source in from.iter() {
@@ -193,15 +265,19 @@ impl SourceInfoBuilder {
                 self.visit_node(*item, ast, true);
             }
             Node::Assign { target, expression } => {
-                self.visit_node(*target, ast, true);
+                // Visit the RHS first to find rhs references before redefinitions,
+                // e.g.
+                // n = 1
+                // n = n + n
                 self.visit_node(*expression, ast, false);
+                self.visit_node(*target, ast, true);
             }
             Node::MultiAssign {
                 targets,
                 expression,
             } => {
-                self.visit_nested(targets, ast, true);
                 self.visit_node(*expression, ast, false);
+                self.visit_nested(targets, ast, true);
             }
             Node::BinaryOp { op, lhs, rhs } => {
                 self.visit_node(*lhs, ast, false);
@@ -302,9 +378,18 @@ impl SourceInfoBuilder {
             }
         }
     }
+
+    fn push_frame(&mut self, locals_capacity: usize) {
+        self.frames.push(Frame::with_capacity(locals_capacity));
+    }
+
+    fn pop_frame(&mut self) {
+        let frame = self.frames.pop().expect("Missing frame");
+        self.definitions.extend(frame.definitions);
+    }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Frame {
     definitions: Vec<Definition>,
 }
@@ -326,14 +411,9 @@ impl Frame {
     fn get_definition(&self, id: ConstantIndex) -> Option<&Definition> {
         self.definitions
             .iter()
+            .rev() // reversed so that the most recent matching definition is found
             .find(|definition| definition.id == id)
     }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Definition {
-    range: Range,
-    id: ConstantIndex,
 }
 
 #[cfg(test)]
@@ -362,85 +442,6 @@ mod test {
             range: range(reference_range.0, reference_range.1, reference_range.2),
             definition: range(definition.0, definition.1, definition.2),
             id,
-        }
-    }
-
-    mod from_ast {
-        use super::*;
-
-        fn from_ast_test(script: &str, expected: SourceInfo) -> Result<()> {
-            let ast = Parser::parse(script)?;
-            let result = SourceInfo::from_ast(&ast);
-
-            for (i, (expected, actual)) in expected
-                .references
-                .iter()
-                .zip(result.references.iter())
-                .enumerate()
-            {
-                assert_eq!(expected, actual, "mismatch in reference {i}");
-            }
-            assert_eq!(expected.references.len(), result.references.len());
-
-            Ok(())
-        }
-
-        fn source_info(references: &[Reference]) -> SourceInfo {
-            SourceInfo {
-                references: references.to_vec(),
-            }
-        }
-
-        #[test]
-        fn empty_script() -> Result<()> {
-            from_ast_test("", source_info(&[]))
-        }
-
-        #[test]
-        fn single_assignment() -> Result<()> {
-            let script = "x = 1";
-            from_ast_test(script, source_info(&[]))
-        }
-
-        #[test]
-        fn single_reference() -> Result<()> {
-            let script = "\
-x = 1
-10 * x
-";
-            from_ast_test(script, source_info(&[reference((1, 5, 1), (0, 0, 1), 0)]))
-        }
-
-        #[test]
-        fn multiple_references() -> Result<()> {
-            let script = "\
-a, b = 1, 2
-a + b
-";
-            from_ast_test(
-                script,
-                source_info(&[
-                    reference((1, 0, 1), (0, 0, 1), 0), // a
-                    reference((1, 4, 1), (0, 3, 1), 1), // b
-                ]),
-            )
-        }
-
-        #[test]
-        fn function_with_capture() -> Result<()> {
-            let script = "\
-foo = 42
-|bar|
-  99 + 100
-  bar + foo
-";
-            from_ast_test(
-                script,
-                source_info(&[
-                    reference((3, 2, 3), (1, 1, 3), 1), // bar
-                    reference((3, 8, 3), (0, 0, 3), 0), // foo
-                ]),
-            )
         }
     }
 
@@ -496,6 +497,176 @@ a + b + c
                     (position(1, 4), Some(range(0, 3, 1))),
                     (position(1, 8), Some(range(0, 6, 1))),
                     (position(1, 2), None),
+                ],
+            )
+        }
+    }
+
+    mod find_references {
+        use super::*;
+
+        fn find_references_test(
+            script: &str,
+            cases: &[(Position, Option<&[Range]>, bool)],
+        ) -> Result<()> {
+            let ast = Parser::parse(script)?;
+            let info = SourceInfo::from_ast(&ast);
+
+            for (i, (position, expected_references, include_definition)) in cases.iter().enumerate()
+            {
+                let references = info.find_references(*position, *include_definition);
+
+                match (expected_references, references) {
+                    (Some(expected_references), Some(mut references)) => {
+                        for (j, (expected, actual)) in expected_references
+                            .iter()
+                            .zip(references.clone())
+                            .enumerate()
+                        {
+                            assert_eq!(*expected, actual, "mismatch in case {i}, reference {j}");
+                        }
+
+                        assert_eq!(
+                            expected_references.len(),
+                            references.count(),
+                            "reference count mismatch in case {i}"
+                        );
+                    }
+                    (None, None) => {}
+                    (Some(_), None) => {
+                        panic!("mismatch in case {i} - expected references but none were found")
+                    }
+                    (None, Some(_)) => {
+                        panic!("mismatch in case {i} - expected no references but some were found")
+                    }
+                }
+            }
+
+            Ok(())
+        }
+
+        #[test]
+        fn single_assignment() -> Result<()> {
+            let script = "\
+x = 42
+1 + x
+  + x
+";
+            find_references_test(
+                script,
+                &[
+                    (
+                        position(0, 0),
+                        Some(&[range(1, 4, 1), range(2, 4, 1)]),
+                        false,
+                    ),
+                    (
+                        position(0, 0),
+                        Some(&[range(0, 0, 1), range(1, 4, 1), range(2, 4, 1)]),
+                        true,
+                    ),
+                    (
+                        position(1, 4),
+                        Some(&[range(0, 0, 1), range(1, 4, 1), range(2, 4, 1)]),
+                        true,
+                    ),
+                    (
+                        position(2, 4),
+                        Some(&[range(1, 4, 1), range(2, 4, 1)]),
+                        false,
+                    ),
+                ],
+            )
+        }
+
+        #[test]
+        fn multiple_assignments() -> Result<()> {
+            let script = "\
+a, b, c = 1, 2, 3
+a
+b
+c
+a + a
+b + b
+c + c
+";
+            find_references_test(
+                script,
+                &[
+                    (
+                        position(4, 4), // a
+                        Some(&[
+                            range(0, 0, 1),
+                            range(1, 0, 1),
+                            range(4, 0, 1),
+                            range(4, 4, 1),
+                        ]),
+                        true,
+                    ),
+                    (
+                        position(2, 0), // b
+                        Some(&[range(2, 0, 1), range(5, 0, 1), range(5, 4, 1)]),
+                        false,
+                    ),
+                    (
+                        position(6, 0), // c
+                        Some(&[
+                            range(0, 6, 1),
+                            range(3, 0, 1),
+                            range(6, 0, 1),
+                            range(6, 4, 1),
+                        ]),
+                        true,
+                    ),
+                ],
+            )
+        }
+
+        #[test]
+        fn definition_after_function() -> Result<()> {
+            let script = "\
+foo = 1, 2, 3
+bar = |n|
+  n * size foo
+x = foo
+";
+            find_references_test(
+                script,
+                &[
+                    (
+                        position(0, 0), // foo
+                        Some(&[range(0, 0, 3), range(2, 11, 3), range(3, 4, 3)]),
+                        true,
+                    ),
+                    (
+                        position(2, 2), // n
+                        Some(&[range(1, 7, 1), range(2, 2, 1)]),
+                        true,
+                    ),
+                ],
+            )
+        }
+
+        #[test]
+        fn redefinition_in_function() -> Result<()> {
+            let script = "\
+foo = |n|
+  n = n.floor()
+  n * n
+";
+            find_references_test(
+                script,
+                &[
+                    (
+                        position(0, 7), // n - arg
+                        Some(&[range(0, 7, 1), range(1, 6, 1)]),
+                        true,
+                    ),
+                    (
+                        position(2, 2), // n - redefinition
+                        Some(&[range(1, 2, 1), range(2, 2, 1), range(2, 6, 1)]),
+                        true,
+                    ),
                 ],
             )
         }

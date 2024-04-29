@@ -328,6 +328,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "is_sorted"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357376465c37db3372ef6a00585d336ed3d0f11d4345eef77ebcb05865392b21"
+
+[[package]]
 name = "itoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -358,6 +364,7 @@ name = "koto-ls"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "is_sorted",
  "koto",
  "parking_lot",
  "tokio",

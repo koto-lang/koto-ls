@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.82"
+is_sorted = "0.1.1"
 koto = { git = "https://github.com/koto-lang/koto" }
 parking_lot = "0.12.2"
 tokio = { version = "1.37.0", features = ["full"] }
