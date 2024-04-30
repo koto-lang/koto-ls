@@ -5,7 +5,7 @@ use koto::parser::{Parser, Span};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tower_lsp::jsonrpc::Result;
+use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
@@ -70,6 +70,10 @@ impl LanguageServer for KotoServer {
                 )),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
                 ..default()
             },
         })
@@ -119,11 +123,11 @@ impl LanguageServer for KotoServer {
             .lock()
             .await
             .get(&uri)
-            .and_then(|info| info.get_reference(position))
-            .map(|reference| {
+            .and_then(|info| info.get_definition(position, true))
+            .map(|definition| {
                 let location = Location {
                     uri: uri.clone(),
-                    range: reference.definition,
+                    range: definition,
                 };
                 GotoDefinitionResponse::Scalar(location)
             });
@@ -164,5 +168,51 @@ impl LanguageServer for KotoServer {
         }
 
         Ok(result)
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri;
+        let position = params.position;
+
+        let range = self.source_info.lock().await.get(&uri).and_then(|info| {
+            info.get_definition(position, false)
+                .or_else(|| info.get_reference(position, false))
+        });
+
+        if let Some(range) = range {
+            Ok(Some(PrepareRenameResponse::Range(range)))
+        } else {
+            Err(Error::invalid_params("No reference found at position"))
+        }
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let source_info = self.source_info.lock().await;
+        if let Some(info) = source_info.get(&uri) {
+            let Some(references) = info.find_references(position, true) else {
+                return Err(Error::invalid_params("No reference found at position"));
+            };
+
+            let edits = references
+                .map(|range| TextEdit {
+                    range,
+                    new_text: params.new_name.clone(),
+                })
+                .collect();
+
+            let result = WorkspaceEdit {
+                changes: Some(HashMap::from_iter([(uri.clone(), edits)])),
+                ..default()
+            };
+
+            Ok(Some(result))
+        } else {
+            Err(Error::invalid_params("No source info for file"))
+        }
     }
 }

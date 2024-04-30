@@ -24,15 +24,32 @@ impl SourceInfo {
         SourceInfoBuilder::from_ast(ast).build()
     }
 
-    pub fn get_reference(&self, position: Position) -> Option<&Reference> {
-        if let Ok(i) = self
-            .references
+    pub fn get_definition(&self, position: Position, include_references: bool) -> Option<Range> {
+        self.definitions
+            .binary_search_by(|definition| cmp_position_to_range(position, &definition.range))
+            .ok()
+            .map(|i| self.definitions[i].range)
+            .or_else(|| {
+                if include_references {
+                    self.get_reference(position, false)
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn get_reference(&self, position: Position, include_definitions: bool) -> Option<Range> {
+        self.references
             .binary_search_by(|reference| cmp_position_to_range(position, &reference.range))
-        {
-            Some(&self.references[i])
-        } else {
-            None
-        }
+            .ok()
+            .map(|i| self.references[i].definition)
+            .or_else(|| {
+                if include_definitions {
+                    self.get_definition(position, false)
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn find_references(
@@ -40,17 +57,7 @@ impl SourceInfo {
         position: Position,
         include_definition: bool,
     ) -> Option<FindReferencesIter> {
-        self.definitions
-            // Find the definition at the given position
-            .binary_search_by(|definition| cmp_position_to_range(position, &definition.range))
-            .ok()
-            .map(|i| self.definitions[i].range)
-            // If no definition was found, what about a reference?
-            .or_else(|| {
-                self.get_reference(position)
-                    .map(|reference| reference.definition)
-            })
-            // Make an output iterator if a definition has been found
+        self.get_definition(position, true)
             .map(|definition| FindReferencesIter {
                 definition,
                 references: self.references.iter(),
@@ -129,11 +136,13 @@ impl SourceInfoBuilder {
         // Sort the definitions, they get added in pop_frame so they aren't in order
         self.definitions
             .sort_by_key(|definition| definition.range.start);
-        // References are already sorted
+
+        // References should already be sorted
         debug_assert!(is_sorted::IsSorted::is_sorted_by_key(
             &mut self.references.iter(),
             |reference| reference.range.start
         ));
+
         SourceInfo {
             definitions: self.definitions,
             references: self.references,
@@ -445,18 +454,18 @@ mod test {
         }
     }
 
-    mod get_reference {
+    mod goto_definition {
         use super::*;
 
-        fn get_reference_test(script: &str, cases: &[(Position, Option<Range>)]) -> Result<()> {
+        fn goto_definition_test(script: &str, cases: &[(Position, Option<Range>)]) -> Result<()> {
             let ast = Parser::parse(script)?;
             let info = SourceInfo::from_ast(&ast);
 
             for (i, (position, expected)) in cases.iter().enumerate() {
-                let result = info.get_reference(*position);
+                let result = info.get_definition(*position, true);
                 match (expected, result) {
                     (Some(expected), Some(result)) => {
-                        assert_eq!(*expected, result.definition, "mismatch in case {i}");
+                        assert_eq!(*expected, result, "mismatch in case {i}");
                     }
                     (None, None) => {}
                     _ => panic!(
@@ -475,7 +484,7 @@ mod test {
 x = 42
 1 + x
 ";
-            get_reference_test(
+            goto_definition_test(
                 script,
                 &[
                     (position(1, 4), Some(range(0, 0, 1))),
@@ -490,7 +499,7 @@ x = 42
 a, b, c = 1, 2, 3
 a + b + c
 ";
-            get_reference_test(
+            goto_definition_test(
                 script,
                 &[
                     (position(1, 0), Some(range(0, 0, 1))),

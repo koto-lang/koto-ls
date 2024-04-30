@@ -366,7 +366,6 @@ dependencies = [
  "anyhow",
  "is_sorted",
  "koto",
- "parking_lot",
  "tokio",
  "tower-lsp",
  "tracing-subscriber",
