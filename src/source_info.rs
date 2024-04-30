@@ -4,8 +4,8 @@ use std::cmp::Ordering;
 
 use anyhow::Result;
 use koto::parser::{
-    Ast, AstFor, AstIf, AstIndex, AstNode, AstString, AstTry, ConstantIndex, Function, IdOrString,
-    LookupNode, MapKey, Node, Span, StringContents, StringNode,
+    Ast, AstFor, AstIf, AstIndex, AstNode, AstString, AstTry, ConstantIndex, Function, LookupNode,
+    Node, Span, StringContents, StringNode,
 };
 use tower_lsp::lsp_types::{Location, Position, Range};
 
@@ -218,16 +218,17 @@ impl SourceInfoBuilder {
             }
             Node::Map(entries) => {
                 for (key, value) in entries.iter() {
-                    match key {
-                        MapKey::Str(s) => self.visit_string(s, ast),
-                        MapKey::Id(id) => {
+                    let key_node = ast.node(*key);
+                    match &key_node.node {
+                        Node::Str(s) => self.visit_string(s, ast),
+                        Node::Id(id) => {
                             // Shorthand syntax?
                             if value.is_none() {
-                                // TODO
-                                // The id could be added as a reference if we had access to a span.
+                                self.add_reference(*id, key_node, ast);
                             }
                         }
-                        MapKey::Meta(_, _) => {
+                        _ => {}
+                        Node::Meta(_, _) => {
                             // There might be something to do here?
                         }
                     }
@@ -249,19 +250,21 @@ impl SourceInfoBuilder {
             }
             Node::Import { from, items } => {
                 for source in from.iter() {
-                    match source {
-                        IdOrString::Id(_) => {
+                    match &ast.node(*source).node {
+                        Node::Id(_) => {
                             // TODO - the from id could be added as a reference if we had a span
                         }
-                        IdOrString::Str(s) => self.visit_string(s, ast),
+                        Node::Str(s) => self.visit_string(s, ast),
+                        _ => {}
                     }
                 }
                 for item in items.iter() {
-                    match &item.item {
-                        IdOrString::Id(_) => {
+                    match &ast.node(item.item).node {
+                        Node::Id(_) => {
                             // TODO - the from id could be added as a reference if we had a span
                         }
-                        IdOrString::Str(s) => self.visit_string(s, ast),
+                        Node::Str(s) => self.visit_string(s, ast),
+                        _ => {}
                     }
                     if let Some(_name) = item.name {
                         // TODO the 'as' name could be added as a definition if we had a span
@@ -677,6 +680,22 @@ foo = |n|
                         true,
                     ),
                 ],
+            )
+        }
+
+        #[test]
+        fn map_shorthand() -> Result<()> {
+            let script = "\
+foo = 99
+{bar: foo, foo}
+";
+            find_references_test(
+                script,
+                &[(
+                    position(0, 0), // foo
+                    Some(&[range(0, 0, 3), range(1, 6, 3), range(1, 11, 3)]),
+                    true,
+                )],
             )
         }
     }
