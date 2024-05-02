@@ -125,6 +125,7 @@ impl LanguageServer for KotoServer {
             .get(&uri)
             .and_then(|info| info.get_definition(position, true))
             .map(|definition| {
+                println!("Definition found: {definition:?}");
                 let location = Location {
                     uri: uri.clone(),
                     range: definition,

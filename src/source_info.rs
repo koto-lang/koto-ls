@@ -282,12 +282,20 @@ impl SourceInfoBuilder {
                 self.visit_node(*item, ast, true);
             }
             Node::Assign { target, expression } => {
-                // Visit the RHS first to find rhs references before redefinitions,
-                // e.g.
-                // n = 1
-                // n = n + n
-                self.visit_node(*expression, ast, false);
-                self.visit_node(*target, ast, true);
+                let lhs_is_definition = matches!(&ast.node(*target).node, Node::Id { .. });
+
+                if lhs_is_definition {
+                    // Visit the RHS first to find rhs references before redefinitions,
+                    // e.g.
+                    // n = 1
+                    // n = n + n
+                    self.visit_node(*expression, ast, false);
+                    self.visit_node(*target, ast, true);
+                } else {
+                    // Visit the LHS first to keep references in order
+                    self.visit_node(*target, ast, false);
+                    self.visit_node(*expression, ast, false);
+                }
             }
             Node::MultiAssign {
                 targets,
@@ -517,6 +525,22 @@ a + b + c
                 ],
             )
         }
+
+        #[test]
+        fn call_arg() -> Result<()> {
+            let script = "\
+f = |x| x * x
+a = 42
+f a
+";
+            goto_definition_test(
+                script,
+                &[
+                    (position(2, 0), Some(range(0, 0, 1))), // f
+                    (position(2, 2), Some(range(1, 0, 1))), // a
+                ],
+            )
+        }
     }
 
     mod find_references {
@@ -725,6 +749,22 @@ from baz import foo
                         true,
                     ),
                 ],
+            )
+        }
+
+        #[test]
+        fn capture_of_imported_item() -> Result<()> {
+            let script = "\
+from foo import bar
+x = |y| y.baz = bar
+";
+            find_references_test(
+                script,
+                &[(
+                    position(0, 17), // bar
+                    Some(&[range(0, 16, 3), range(1, 16, 3)]),
+                    true,
+                )],
             )
         }
     }
