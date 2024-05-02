@@ -1,13 +1,10 @@
-#![allow(unused)]
-
 use std::cmp::Ordering;
 
-use anyhow::Result;
 use koto::parser::{
-    Ast, AstFor, AstIf, AstIndex, AstNode, AstString, AstTry, ConstantIndex, Function, LookupNode,
-    Node, Span, StringContents, StringNode,
+    Ast, AstIndex, AstNode, AstString, ConstantIndex, LookupNode, Node, Span, StringContents,
+    StringNode,
 };
-use tower_lsp::lsp_types::{Location, Position, Range};
+use tower_lsp::lsp_types::{Position, Range};
 
 use crate::utils::koto_span_to_lsp_range;
 
@@ -223,10 +220,10 @@ impl SourceInfoBuilder {
                                 self.add_reference(*id, key_node, ast);
                             }
                         }
-                        _ => {}
                         Node::Meta(_, _) => {
                             // There might be something to do here?
                         }
+                        _ => {}
                     }
                     if let Some(value) = value {
                         self.visit_node(*value, ast, false);
@@ -300,7 +297,7 @@ impl SourceInfoBuilder {
                 self.visit_node(*expression, ast, false);
                 self.visit_nested(targets, ast, true);
             }
-            Node::BinaryOp { op, lhs, rhs } => {
+            Node::BinaryOp { lhs, rhs, .. } => {
                 self.visit_node(*lhs, ast, false);
                 self.visit_node(*rhs, ast, false);
             }
@@ -440,6 +437,7 @@ impl Frame {
 #[cfg(test)]
 mod test {
     use super::*;
+    use anyhow::Result;
     use koto::parser::Parser;
     use tower_lsp::lsp_types::Position;
 
@@ -451,18 +449,6 @@ mod test {
         Range {
             start: position(line, column),
             end: position(line, column + length),
-        }
-    }
-
-    fn reference(
-        reference_range: (u32, u32, u32),
-        definition: (u32, u32, u32),
-        id: ConstantIndex,
-    ) -> Reference {
-        Reference {
-            range: range(reference_range.0, reference_range.1, reference_range.2),
-            definition: range(definition.0, definition.1, definition.2),
-            id,
         }
     }
 
@@ -554,7 +540,7 @@ f a
                 let references = info.find_references(*position, *include_definition);
 
                 match (expected_references, references) {
-                    (Some(expected_references), Some(mut references)) => {
+                    (Some(expected_references), Some(references)) => {
                         for (j, (expected, actual)) in expected_references
                             .iter()
                             .zip(references.clone())
