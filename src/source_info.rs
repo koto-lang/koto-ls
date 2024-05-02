@@ -249,25 +249,30 @@ impl SourceInfoBuilder {
                 self.pop_frame();
             }
             Node::Import { from, items } => {
-                for source in from.iter() {
-                    match &ast.node(*source).node {
-                        Node::Id(_) => {
-                            // TODO - the from id could be added as a reference if we had a span
+                for (i, source) in from.iter().enumerate() {
+                    let source_node = ast.node(*source);
+                    match &source_node.node {
+                        Node::Id(id) => {
+                            if i == 0 {
+                                self.add_reference(*id, source_node, ast);
+                            }
                         }
                         Node::Str(s) => self.visit_string(s, ast),
                         _ => {}
                     }
                 }
                 for item in items.iter() {
-                    match &ast.node(item.item).node {
-                        Node::Id(_) => {
-                            // TODO - the from id could be added as a reference if we had a span
+                    let item_node = ast.node(item.item);
+                    match (&item_node.node, item.name) {
+                        (Node::Id(id), None) => self.add_definition(*id, item_node, ast),
+                        (Node::Str(s), None) => self.visit_string(s, ast),
+                        (_, Some(name)) => {
+                            let name_node = ast.node(name);
+                            if let Node::Id(id) = &name_node.node {
+                                self.add_definition(*id, name_node, ast)
+                            }
                         }
-                        Node::Str(s) => self.visit_string(s, ast),
                         _ => {}
-                    }
-                    if let Some(_name) = item.name {
-                        // TODO the 'as' name could be added as a definition if we had a span
                     }
                 }
             }
@@ -696,6 +701,30 @@ foo = 99
                     Some(&[range(0, 0, 3), range(1, 6, 3), range(1, 11, 3)]),
                     true,
                 )],
+            )
+        }
+
+        #[test]
+        fn imported_item() -> Result<()> {
+            let script = "\
+import foo, bar as baz
+foo()
+from baz import foo
+";
+            find_references_test(
+                script,
+                &[
+                    (
+                        position(1, 0), // foo
+                        Some(&[range(0, 7, 3), range(1, 0, 3)]),
+                        true,
+                    ),
+                    (
+                        position(2, 6), // baz
+                        Some(&[range(0, 19, 3), range(2, 5, 3)]),
+                        true,
+                    ),
+                ],
             )
         }
     }
