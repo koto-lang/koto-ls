@@ -207,10 +207,6 @@ impl SourceInfoBuilder {
                     self.visit_node(*next, ast, false);
                 }
             }
-            Node::NamedCall { id, args } => {
-                self.add_reference(*id, node, ast);
-                self.visit_nested(args, ast, false);
-            }
             Node::Str(s) => self.visit_string(s, ast),
             Node::Range { start, end, .. } => {
                 self.visit_node(*start, ast, false);
