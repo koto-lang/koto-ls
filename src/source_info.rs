@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use koto::parser::{
-    Ast, AstIndex, AstNode, AstString, ConstantIndex, LookupNode, Node, Span, StringContents,
+    Ast, AstIndex, AstNode, AstString, ChainNode, ConstantIndex, Node, Span, StringContents,
     StringNode,
 };
 use tower_lsp::lsp_types::{Position, Range};
@@ -192,13 +192,13 @@ impl SourceInfoBuilder {
             Node::Meta(_, _) => {
                 // There may be something to do here with named meta entries?
             }
-            Node::Lookup((lookup_node, next)) => {
+            Node::Chain((lookup_node, next)) => {
                 match lookup_node {
-                    LookupNode::Root(root) => self.visit_node(*root, ast, false),
-                    LookupNode::Id(id) => self.add_reference(*id, node, ast),
-                    LookupNode::Str(s) => self.visit_string(s, ast),
-                    LookupNode::Index(node) => self.visit_node(*node, ast, false),
-                    LookupNode::Call { args, .. } => self.visit_nested(args, ast, false),
+                    ChainNode::Root(root) => self.visit_node(*root, ast, false),
+                    ChainNode::Id(id) => self.add_reference(*id, node, ast),
+                    ChainNode::Str(s) => self.visit_string(s, ast),
+                    ChainNode::Index(node) => self.visit_node(*node, ast, false),
+                    ChainNode::Call { args, .. } => self.visit_nested(args, ast, false),
                 }
                 if let Some(next) = next {
                     self.visit_node(*next, ast, false);
