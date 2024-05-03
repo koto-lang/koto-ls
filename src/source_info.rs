@@ -1,10 +1,9 @@
-use std::cmp::Ordering;
-
 use koto::parser::{
     Ast, AstIndex, AstNode, AstString, ChainNode, ConstantIndex, Node, Span, StringContents,
-    StringNode,
+    StringNode, StringSlice,
 };
-use tower_lsp::lsp_types::{Position, Range};
+use std::cmp::Ordering;
+use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind};
 
 use crate::utils::koto_span_to_lsp_range;
 
@@ -61,6 +60,12 @@ impl SourceInfo {
                 include_definition,
             })
     }
+
+    pub fn top_level_definitions(&self) -> impl Iterator<Item = &Definition> {
+        self.definitions
+            .iter()
+            .filter(|definition| definition.top_level)
+    }
 }
 
 #[derive(Clone)]
@@ -101,14 +106,61 @@ fn cmp_position_to_range(position: Position, range: &Range) -> Ordering {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Definition {
     range: Range,
-    id: ConstantIndex,
+    id: StringSlice,
+    kind: SymbolKind,
+    // true for definitions at the top-level of the script, i.e. not in a function
+    top_level: bool,
+    children: Option<Vec<Definition>>,
+}
+
+impl Definition {
+    fn new(
+        id: StringSlice,
+        span: Span,
+        kind: SymbolKind,
+        top_level: bool,
+        children: Vec<Definition>,
+    ) -> Self {
+        Self {
+            range: koto_span_to_lsp_range(span),
+            id,
+            kind,
+            top_level,
+            children: if children.is_empty() {
+                None
+            } else {
+                Some(children)
+            },
+        }
+    }
+}
+
+impl From<&Definition> for DocumentSymbol {
+    fn from(value: &Definition) -> Self {
+        let children = value
+            .children
+            .as_ref()
+            .map(|children| children.iter().map(DocumentSymbol::from).collect());
+
+        #[allow(deprecated)]
+        Self {
+            name: value.id.as_str().into(),
+            detail: None,
+            kind: value.kind,
+            tags: None,
+            deprecated: None,
+            range: value.range,
+            selection_range: value.range,
+            children,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reference {
     pub range: Range,
     pub definition: Range,
-    pub id: ConstantIndex,
+    pub id: StringSlice,
 }
 
 #[derive(Default)]
@@ -123,7 +175,7 @@ impl SourceInfoBuilder {
         let mut result = Self::default();
 
         if let Some(entry_point) = ast.entry_point() {
-            result.visit_node(entry_point, ast, false);
+            result.visit_node(entry_point, Context::new(ast));
         };
 
         result
@@ -146,8 +198,11 @@ impl SourceInfoBuilder {
         }
     }
 
-    fn visit_node(&mut self, node_index: AstIndex, ast: &Ast, id_is_definition: bool) {
-        let node = ast.node(node_index);
+    // Returns an optional list of child definitions
+    fn visit_node(&mut self, node_index: AstIndex, ctx: Context) -> Vec<Definition> {
+        let mut child_definitions = Vec::new();
+
+        let node = ctx.node(node_index);
         match &node.node {
             // Nodes that can be skipped
             Node::Null
@@ -170,23 +225,31 @@ impl SourceInfoBuilder {
             | Node::Yield(node)
             | Node::Debug {
                 expression: node, ..
-            } => self.visit_node(*node, ast, false),
+            } => {
+                self.visit_node(*node, ctx.default());
+            }
             // Nodes with a list of nodes that should be visited
             Node::List(nodes)
             | Node::Tuple(nodes)
             | Node::TempTuple(nodes)
-            | Node::Block(nodes) => self.visit_nested(nodes, ast, false),
+            | Node::Block(nodes) => self.visit_nested(nodes, ctx.default()),
             // Nodes with an optional child node
             Node::Break(maybe_node) | Node::Return(maybe_node) => {
                 if let Some(node) = maybe_node {
-                    self.visit_node(*node, ast, false);
+                    self.visit_node(*node, ctx.default());
                 }
             }
             Node::Id(id) => {
-                if id_is_definition {
-                    self.add_definition(*id, node, ast);
+                if ctx.id_is_definition {
+                    self.add_definition(
+                        ctx.string(*id),
+                        SymbolKind::VARIABLE,
+                        vec![],
+                        node,
+                        ctx.ast,
+                    );
                 } else {
-                    self.add_reference(*id, node, ast);
+                    self.add_reference(*id, node, ctx.ast);
                 }
             }
             Node::Meta(_, _) => {
@@ -194,75 +257,121 @@ impl SourceInfoBuilder {
             }
             Node::Chain((lookup_node, next)) => {
                 match lookup_node {
-                    ChainNode::Root(root) => self.visit_node(*root, ast, false),
-                    ChainNode::Id(id) => self.add_reference(*id, node, ast),
-                    ChainNode::Str(s) => self.visit_string(s, ast),
-                    ChainNode::Index(node) => self.visit_node(*node, ast, false),
-                    ChainNode::Call { args, .. } => self.visit_nested(args, ast, false),
+                    ChainNode::Root(root) => {
+                        self.visit_node(*root, ctx.default());
+                    }
+                    ChainNode::Id(id) => self.add_reference(*id, node, ctx.ast),
+                    ChainNode::Str(s) => self.visit_string(s, ctx.default()),
+                    ChainNode::Index(node) => {
+                        self.visit_node(*node, ctx.default());
+                    }
+                    ChainNode::Call { args, .. } => self.visit_nested(args, ctx.default()),
                 }
                 if let Some(next) = next {
-                    self.visit_node(*next, ast, false);
+                    self.visit_node(*next, ctx.default());
                 }
             }
-            Node::Str(s) => self.visit_string(s, ast),
+            Node::Str(s) => self.visit_string(s, ctx.default()),
             Node::Range { start, end, .. } => {
-                self.visit_node(*start, ast, false);
-                self.visit_node(*end, ast, false);
+                self.visit_node(*start, ctx.default());
+                self.visit_node(*end, ctx.default());
             }
             Node::Map(entries) => {
                 for (key, value) in entries.iter() {
-                    let key_node = ast.node(*key);
+                    let key_node = ctx.node(*key);
                     match &key_node.node {
-                        Node::Str(s) => self.visit_string(s, ast),
+                        Node::Str(s) => self.visit_string(s, ctx.default()),
                         Node::Id(id) => {
                             // Shorthand syntax?
                             if value.is_none() {
-                                self.add_reference(*id, key_node, ast);
+                                self.add_reference(*id, key_node, ctx.ast);
+                            }
+
+                            // Count the map key as a top-level definition?
+                            // id_is_definition will be true when exporting a map.
+                            if ctx.id_is_definition {
+                                self.add_definition(
+                                    ctx.string(*id),
+                                    SymbolKind::FIELD,
+                                    vec![],
+                                    key_node,
+                                    ctx.ast,
+                                );
+                            } else {
+                                child_definitions.push(Definition::new(
+                                    ctx.string(*id),
+                                    *ctx.ast.span(key_node.span),
+                                    SymbolKind::FIELD,
+                                    self.frames.len() == 1, // TODO - use frame.is_top_level?
+                                    vec![],                 // TODO - nested child definitions?
+                                ))
                             }
                         }
-                        Node::Meta(_, _) => {
-                            // There might be something to do here?
+                        Node::Meta(key_id, maybe_name) => {
+                            let field_id = match maybe_name {
+                                Some(name) => format!("{key_id} {}", ctx.string(*name).as_str()),
+                                None => format!("{key_id}"),
+                            };
+                            child_definitions.push(Definition::new(
+                                StringSlice::from(field_id),
+                                *ctx.ast.span(key_node.span),
+                                SymbolKind::FIELD,
+                                self.frames.len() == 1, // TODO - use frame.is_top_level?
+                                vec![],                 // TODO - nested child definitions?
+                            ))
                         }
                         _ => {}
                     }
                     if let Some(value) = value {
-                        self.visit_node(*value, ast, false);
+                        self.visit_node(*value, ctx.default());
                     }
                 }
             }
             Node::MainBlock { body, local_count } => {
                 self.push_frame(*local_count);
-                self.visit_nested(body, ast, false);
+                self.visit_nested(body, ctx.default());
                 self.pop_frame();
             }
             Node::Function(info) => {
                 self.push_frame(info.local_count + info.args.len());
-                self.visit_nested(&info.args, ast, true);
-                self.visit_node(info.body, ast, false);
+                self.visit_nested(&info.args, ctx.with_ids_as_definitions());
+                self.visit_node(info.body, ctx.default());
                 self.pop_frame();
             }
             Node::Import { from, items } => {
                 for (i, source) in from.iter().enumerate() {
-                    let source_node = ast.node(*source);
+                    let source_node = ctx.node(*source);
                     match &source_node.node {
                         Node::Id(id) => {
                             if i == 0 {
-                                self.add_reference(*id, source_node, ast);
+                                self.add_reference(*id, source_node, ctx.ast);
                             }
                         }
-                        Node::Str(s) => self.visit_string(s, ast),
+                        Node::Str(s) => self.visit_string(s, ctx.default()),
                         _ => {}
                     }
                 }
                 for item in items.iter() {
-                    let item_node = ast.node(item.item);
+                    let item_node = ctx.node(item.item);
                     match (&item_node.node, item.name) {
-                        (Node::Id(id), None) => self.add_definition(*id, item_node, ast),
-                        (Node::Str(s), None) => self.visit_string(s, ast),
+                        (Node::Id(id), None) => self.add_definition(
+                            ctx.string(*id),
+                            SymbolKind::VARIABLE,
+                            vec![],
+                            item_node,
+                            ctx.ast,
+                        ),
+                        (Node::Str(s), None) => self.visit_string(s, ctx.default()),
                         (_, Some(name)) => {
-                            let name_node = ast.node(name);
+                            let name_node = ctx.node(name);
                             if let Node::Id(id) = &name_node.node {
-                                self.add_definition(*id, name_node, ast)
+                                self.add_definition(
+                                    ctx.string(*id),
+                                    SymbolKind::VARIABLE,
+                                    vec![],
+                                    name_node,
+                                    ctx.ast,
+                                )
                             }
                         }
                         _ => {}
@@ -270,112 +379,152 @@ impl SourceInfoBuilder {
                 }
             }
             Node::Export(item) => {
-                // Set id_is_definition to true to count exported map keys as definitions,
-                // (currently this won't work because map keys don't have spans yet)
-                self.visit_node(*item, ast, true);
+                // Set id_is_definition to true to count exported map keys as definitions
+                self.visit_node(*item, ctx.with_ids_as_definitions());
             }
             Node::Assign { target, expression } => {
-                let lhs_is_definition = matches!(&ast.node(*target).node, Node::Id { .. });
+                let target_node = ctx.node(*target);
+                match &target_node.node {
+                    Node::Id(id) => {
+                        // LHS is an id, so this is a definition
+                        let kind = node_symbol_kind(&ctx.node(*expression).node);
 
-                if lhs_is_definition {
-                    // Visit the RHS first to find rhs references before redefinitions,
-                    // e.g.
-                    // n = 1
-                    // n = n + n
-                    self.visit_node(*expression, ast, false);
-                    self.visit_node(*target, ast, true);
-                } else {
-                    // Visit the LHS first to keep references in order
-                    self.visit_node(*target, ast, false);
-                    self.visit_node(*expression, ast, false);
+                        // Visit the RHS before adding the definition to find rhs references before
+                        // redefinitions, e.g.
+                        //   n = 1
+                        //   n = n + n
+                        let child_definitions = self.visit_node(*expression, ctx.default());
+                        self.add_definition(
+                            ctx.string(*id),
+                            kind,
+                            child_definitions,
+                            target_node,
+                            ctx.ast,
+                        );
+                    }
+                    Node::Meta(key_id, maybe_name) => {
+                        let child_definitions = self.visit_node(*expression, ctx.default());
+                        let target_id = match maybe_name {
+                            Some(name) => format!("{key_id} {}", ctx.string(*name).as_str()),
+                            None => format!("{key_id}"),
+                        };
+                        self.add_definition(
+                            StringSlice::from(target_id),
+                            SymbolKind::FIELD,
+                            child_definitions,
+                            target_node,
+                            ctx.ast,
+                        );
+                    }
+                    _ => {
+                        // Visit the LHS first to keep references in order
+                        self.visit_node(*target, ctx.default());
+                        self.visit_node(*expression, ctx.default());
+                    }
                 }
             }
             Node::MultiAssign {
                 targets,
                 expression,
             } => {
-                self.visit_node(*expression, ast, false);
-                self.visit_nested(targets, ast, true);
+                self.visit_node(*expression, ctx.default());
+                self.visit_nested(targets, ctx.with_ids_as_definitions());
             }
             Node::BinaryOp { lhs, rhs, .. } => {
-                self.visit_node(*lhs, ast, false);
-                self.visit_node(*rhs, ast, false);
+                self.visit_node(*lhs, ctx.default());
+                self.visit_node(*rhs, ctx.default());
             }
             Node::If(info) => {
-                self.visit_node(info.condition, ast, false);
-                self.visit_node(info.then_node, ast, false);
+                self.visit_node(info.condition, ctx.default());
+                self.visit_node(info.then_node, ctx.default());
                 for (else_if_condition, else_if_block) in info.else_if_blocks.iter() {
-                    self.visit_node(*else_if_condition, ast, false);
-                    self.visit_node(*else_if_block, ast, false);
+                    self.visit_node(*else_if_condition, ctx.default());
+                    self.visit_node(*else_if_block, ctx.default());
                 }
                 if let Some(else_node) = info.else_node {
-                    self.visit_node(else_node, ast, false);
+                    self.visit_node(else_node, ctx.default());
                 }
             }
             Node::Match { expression, arms } => {
-                self.visit_node(*expression, ast, false);
+                self.visit_node(*expression, ctx.default());
                 for arm in arms.iter() {
                     for pattern in arm.patterns.iter() {
-                        self.visit_node(*pattern, ast, true);
+                        self.visit_node(*pattern, ctx.with_ids_as_definitions());
                     }
                     if let Some(condition) = arm.condition {
-                        self.visit_node(condition, ast, false);
+                        self.visit_node(condition, ctx.default());
                     }
-                    self.visit_node(arm.expression, ast, false);
+                    self.visit_node(arm.expression, ctx.default());
                 }
             }
             Node::Switch(arms) => {
                 for arm in arms.iter() {
                     if let Some(condition) = arm.condition {
-                        self.visit_node(condition, ast, false);
+                        self.visit_node(condition, ctx.default());
                     }
-                    self.visit_node(arm.expression, ast, false);
+                    self.visit_node(arm.expression, ctx.default());
                 }
             }
             Node::Ellipsis(maybe_id) => {
                 if let Some(id) = maybe_id {
-                    if id_is_definition {
-                        self.add_definition(*id, node, ast);
+                    if ctx.id_is_definition {
+                        self.add_definition(
+                            ctx.string(*id),
+                            SymbolKind::VARIABLE,
+                            vec![],
+                            node,
+                            ctx.ast,
+                        );
                     }
                 }
             }
             Node::For(info) => {
-                self.visit_nested(&info.args, ast, true);
-                self.visit_node(info.iterable, ast, false);
-                self.visit_node(info.body, ast, false);
+                self.visit_nested(&info.args, ctx.with_ids_as_definitions());
+                self.visit_node(info.iterable, ctx.default());
+                self.visit_node(info.body, ctx.default());
             }
             Node::While { condition, body } | Node::Until { condition, body } => {
-                self.visit_node(*condition, ast, false);
-                self.visit_node(*body, ast, false);
+                self.visit_node(*condition, ctx.default());
+                self.visit_node(*body, ctx.default());
             }
             Node::Try(info) => {
-                self.visit_node(info.try_block, ast, false);
-                self.visit_node(info.catch_arg, ast, true);
-                self.visit_node(info.catch_block, ast, false);
+                self.visit_node(info.try_block, ctx.default());
+                self.visit_node(info.catch_arg, ctx.with_ids_as_definitions());
+                self.visit_node(info.catch_block, ctx.default());
                 if let Some(finally_block) = info.finally_block {
-                    self.visit_node(finally_block, ast, false);
+                    self.visit_node(finally_block, ctx.default());
                 }
             }
-        }
+        };
+
+        child_definitions
     }
 
-    fn visit_nested(&mut self, nested: &[AstIndex], ast: &Ast, id_is_definition: bool) {
+    fn visit_nested(&mut self, nested: &[AstIndex], ctx: Context) {
         for node in nested.iter() {
-            self.visit_node(*node, ast, id_is_definition);
+            self.visit_node(*node, ctx.clone());
         }
     }
 
-    fn add_definition(&mut self, id: ConstantIndex, node: &AstNode, ast: &Ast) {
+    fn add_definition(
+        &mut self,
+        id: StringSlice,
+        kind: SymbolKind,
+        children: Vec<Definition>,
+        node: &AstNode,
+        ast: &Ast,
+    ) {
         let span = ast.span(node.span);
         self.frames
             .last_mut()
             .expect("Missing frame")
-            .add_definition(id, *span);
+            .add_definition(id, *span, kind, children);
     }
 
     fn add_reference(&mut self, id: ConstantIndex, node: &AstNode, ast: &Ast) {
+        let id = ast.constants().get_string_slice(id);
         for frame in self.frames.iter().rev() {
-            if let Some(definition) = frame.get_definition(id) {
+            if let Some(definition) = frame.get_definition(&id) {
                 let span = ast.span(node.span);
                 self.references.push(Reference {
                     range: koto_span_to_lsp_range(*span),
@@ -387,18 +536,21 @@ impl SourceInfoBuilder {
         }
     }
 
-    fn visit_string(&mut self, string: &AstString, ast: &Ast) {
+    fn visit_string(&mut self, string: &AstString, ctx: Context) {
         if let StringContents::Interpolated(string_nodes) = &string.contents {
             for string_node in string_nodes.iter() {
                 if let StringNode::Expression { expression, .. } = string_node {
-                    self.visit_node(*expression, ast, false);
+                    self.visit_node(*expression, ctx.default());
                 };
             }
         }
     }
 
     fn push_frame(&mut self, locals_capacity: usize) {
-        self.frames.push(Frame::with_capacity(locals_capacity));
+        self.frames.push(Frame {
+            definitions: Vec::with_capacity(locals_capacity),
+            top_level: self.frames.is_empty(),
+        });
     }
 
     fn pop_frame(&mut self) {
@@ -410,27 +562,78 @@ impl SourceInfoBuilder {
 #[derive(Default, Debug)]
 struct Frame {
     definitions: Vec<Definition>,
+    top_level: bool,
 }
 
 impl Frame {
-    fn with_capacity(local_count: usize) -> Self {
-        Self {
-            definitions: Vec::with_capacity(local_count),
-        }
+    fn add_definition(
+        &mut self,
+        id: StringSlice,
+        span: Span,
+        kind: SymbolKind,
+        children: Vec<Definition>,
+    ) {
+        self.definitions
+            .push(Definition::new(id, span, kind, self.top_level, children));
     }
 
-    fn add_definition(&mut self, id: ConstantIndex, span: Span) {
-        self.definitions.push(Definition {
-            range: koto_span_to_lsp_range(span),
-            id,
-        })
-    }
-
-    fn get_definition(&self, id: ConstantIndex) -> Option<&Definition> {
+    fn get_definition(&self, id: &StringSlice) -> Option<&Definition> {
         self.definitions
             .iter()
             .rev() // reversed so that the most recent matching definition is found
-            .find(|definition| definition.id == id)
+            .find(|definition| definition.id == *id)
+    }
+}
+
+#[derive(Clone)]
+struct Context<'a> {
+    ast: &'a Ast,
+    id_is_definition: bool,
+}
+
+impl<'a> Context<'a> {
+    fn new(ast: &'a Ast) -> Self {
+        Self {
+            ast,
+            id_is_definition: false,
+        }
+    }
+
+    fn default(&self) -> Self {
+        Self {
+            ast: self.ast,
+            id_is_definition: false,
+        }
+    }
+
+    fn with_ids_as_definitions(&self) -> Self {
+        Self {
+            ast: self.ast,
+            id_is_definition: true,
+        }
+    }
+
+    fn node(&self, index: AstIndex) -> &AstNode {
+        self.ast.node(index)
+    }
+
+    fn string(&self, constant_index: ConstantIndex) -> StringSlice {
+        self.ast.constants().get_string_slice(constant_index)
+    }
+}
+
+fn node_symbol_kind(node: &Node) -> SymbolKind {
+    use Node::*;
+
+    match node {
+        Null => SymbolKind::NULL,
+        BoolTrue | BoolFalse => SymbolKind::BOOLEAN,
+        SmallInt { .. } | Int { .. } | Float { .. } => SymbolKind::NUMBER,
+        Str { .. } => SymbolKind::STRING,
+        List { .. } | Tuple { .. } | TempTuple { .. } => SymbolKind::ARRAY,
+        Map { .. } => SymbolKind::OBJECT,
+        Function { .. } => SymbolKind::FUNCTION,
+        _ => SymbolKind::VARIABLE,
     }
 }
 
@@ -746,6 +949,157 @@ x = |y| y.baz = bar
                     position(0, 17), // bar
                     Some(&[range(0, 16, 3), range(1, 16, 3)]),
                     true,
+                )],
+            )
+        }
+    }
+
+    mod top_level_definitions {
+        use tower_lsp::lsp_types::SymbolKind;
+
+        use super::*;
+
+        struct TestDefinition<'a> {
+            range: Range,
+            id: &'static str,
+            kind: SymbolKind,
+            children: &'a [TestDefinition<'a>],
+        }
+
+        fn definition<'a>(
+            range: Range,
+            id: &'static str,
+            kind: SymbolKind,
+            children: &'a [TestDefinition<'a>],
+        ) -> TestDefinition<'a> {
+            TestDefinition {
+                range,
+                id,
+                kind,
+                children,
+            }
+        }
+
+        fn top_level_definitions_test(
+            script: &str,
+            expected_definitions: &[TestDefinition],
+        ) -> Result<()> {
+            let ast = Parser::parse(script)?;
+            let info = SourceInfo::from_ast(&ast);
+            let definitions = info.top_level_definitions().collect::<Vec<_>>();
+
+            for (i, (expected, actual)) in expected_definitions
+                .iter()
+                .zip(definitions.iter())
+                .enumerate()
+            {
+                assert_eq!(expected.range, actual.range, "mismatch in definition {i}");
+                assert_eq!(
+                    expected.id,
+                    actual.id.as_str(),
+                    "mismatch in definition {i}"
+                );
+                assert_eq!(expected.kind, actual.kind, "mismatch in definition {i}");
+
+                if let Some(actual_children) = &actual.children {
+                    for (j, (expected_child, actual_child)) in expected
+                        .children
+                        .iter()
+                        .zip(actual_children.iter())
+                        .enumerate()
+                    {
+                        assert_eq!(
+                            expected_child.range, actual_child.range,
+                            "mismatch in definition {i}, child {j}"
+                        );
+                        assert_eq!(
+                            expected_child.id,
+                            actual_child.id.as_str(),
+                            "mismatch in definition {i}, child {j}"
+                        );
+                        assert_eq!(
+                            expected_child.kind, actual_child.kind,
+                            "mismatch in definition {i}, child {j}"
+                        );
+                    }
+
+                    assert_eq!(
+                        expected.children.len(),
+                        actual_children.len(),
+                        "child count mismatch in definition {i}"
+                    );
+                } else {
+                    assert!(expected.children.is_empty(), "mismatch in definition {i}");
+                }
+            }
+
+            assert_eq!(
+                expected_definitions.len(),
+                definitions.len(),
+                "definition count mismatch"
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn top_level_assignments() -> Result<()> {
+            let script = "\
+a = 42
+foo = 99
+
+bar = |n|
+  x = n
+  x * x
+
+x, y, z = f()
+";
+            top_level_definitions_test(
+                script,
+                &[
+                    definition(range(0, 0, 1), "a", SymbolKind::NUMBER, &[]),
+                    definition(range(1, 0, 3), "foo", SymbolKind::NUMBER, &[]),
+                    definition(range(3, 0, 3), "bar", SymbolKind::FUNCTION, &[]),
+                    definition(range(7, 0, 1), "x", SymbolKind::VARIABLE, &[]),
+                    definition(range(7, 3, 1), "y", SymbolKind::VARIABLE, &[]),
+                    definition(range(7, 6, 1), "z", SymbolKind::VARIABLE, &[]),
+                ],
+            )
+        }
+
+        #[test]
+        fn exported_map_keys() -> Result<()> {
+            let script = "\
+export
+  a: 123
+  b: 99
+";
+            top_level_definitions_test(
+                script,
+                &[
+                    definition(range(1, 2, 1), "a", SymbolKind::FIELD, &[]),
+                    definition(range(2, 2, 1), "b", SymbolKind::FIELD, &[]),
+                ],
+            )
+        }
+
+        #[test]
+        fn map_entries() -> Result<()> {
+            let script = "\
+x = 
+  a: 123
+  b: 99
+";
+            top_level_definitions_test(
+                script,
+                &[definition(
+                    range(0, 0, 1),
+                    "x",
+                    SymbolKind::OBJECT,
+                    &[
+                        definition(range(1, 2, 1), "a", SymbolKind::FIELD, &[]),
+                        definition(range(2, 2, 1), "b", SymbolKind::FIELD, &[]),
+                    ],
                 )],
             )
         }

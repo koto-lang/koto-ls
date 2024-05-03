@@ -69,6 +69,7 @@ impl LanguageServer for KotoServer {
                     TextDocumentSyncKind::FULL,
                 )),
                 definition_provider: Some(OneOf::Left(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Right(RenameOptions {
                     prepare_provider: Some(true),
@@ -110,6 +111,22 @@ impl LanguageServer for KotoServer {
                 .log_message(MessageType::INFO, "No changes?")
                 .await;
         }
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri;
+        let result = self.source_info.lock().await.get(&uri).map(|info| {
+            let definitions = info
+                .top_level_definitions()
+                .map(DocumentSymbol::from)
+                .collect();
+            DocumentSymbolResponse::Nested(definitions)
+        });
+
+        Ok(result)
     }
 
     async fn goto_definition(
