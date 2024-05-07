@@ -11,7 +11,7 @@ use tower_lsp::{Client, LanguageServer};
 
 pub struct KotoServer {
     client: Client,
-    source_info: Arc<Mutex<HashMap<Url, SourceInfo>>>,
+    source_info: Arc<Mutex<HashMap<Arc<Url>, SourceInfo>>>,
 }
 
 impl KotoServer {
@@ -40,10 +40,11 @@ impl KotoServer {
         self.client
             .publish_diagnostics(uri.clone(), vec![], Some(version))
             .await;
+        let uri = Arc::new(uri);
         self.source_info
             .lock()
             .await
-            .insert(uri, SourceInfo::from_ast(&ast));
+            .insert(uri.clone(), SourceInfo::from_ast(&ast, uri));
     }
 
     async fn report_koto_error(&self, span: Span, message: String, uri: Url, version: i32) {
@@ -140,14 +141,10 @@ impl LanguageServer for KotoServer {
             .lock()
             .await
             .get(&uri)
-            .and_then(|info| info.get_definition_range(position, true))
+            .and_then(|info| info.get_definition_location(position, true))
             .map(|definition| {
                 println!("Definition found: {definition:?}");
-                let location = Location {
-                    uri: uri.clone(),
-                    range: definition,
-                };
-                GotoDefinitionResponse::Scalar(location)
+                GotoDefinitionResponse::Scalar(definition.into())
             });
 
         if result.is_none() {
@@ -170,14 +167,7 @@ impl LanguageServer for KotoServer {
             .await
             .get(&uri)
             .and_then(|info| info.find_references(position, include_declaration))
-            .map(|references| {
-                references
-                    .map(|reference| Location {
-                        uri: uri.clone(),
-                        range: reference,
-                    })
-                    .collect()
-            });
+            .map(|references| references.map(Location::from).collect());
 
         if result.is_none() {
             self.client
@@ -195,15 +185,15 @@ impl LanguageServer for KotoServer {
         let uri = params.text_document.uri;
         let position = params.position;
 
-        let range = self
+        let location = self
             .source_info
             .lock()
             .await
             .get(&uri)
-            .and_then(|info| info.get_definition_range(position, true));
+            .and_then(|info| info.get_definition_location(position, true));
 
-        if let Some(range) = range {
-            Ok(Some(PrepareRenameResponse::Range(range)))
+        if let Some(location) = location {
+            Ok(Some(PrepareRenameResponse::Range(location.range)))
         } else {
             Err(Error::invalid_params("No reference found at position"))
         }
@@ -218,15 +208,19 @@ impl LanguageServer for KotoServer {
                 return Err(Error::invalid_params("No reference found at position"));
             };
 
-            let edits = references
-                .map(|range| TextEdit {
-                    range,
-                    new_text: params.new_name.clone(),
-                })
-                .collect();
+            let mut changes = HashMap::new();
+            for reference in references {
+                changes
+                    .entry(reference.uri.as_ref().clone())
+                    .or_insert_with(Vec::new)
+                    .push(TextEdit {
+                        range: reference.range,
+                        new_text: params.new_name.clone(),
+                    });
+            }
 
             let result = WorkspaceEdit {
-                changes: Some(HashMap::from_iter([(uri.clone(), edits)])),
+                changes: Some(changes),
                 ..default()
             };
 

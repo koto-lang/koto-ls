@@ -2,8 +2,8 @@ use koto::parser::{
     Ast, AstIndex, AstNode, AstString, ChainNode, ConstantIndex, ImportItem, Node, Span,
     StringContents, StringNode, StringSlice,
 };
-use std::cmp::Ordering;
-use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind};
+use std::{cmp::Ordering, sync::Arc};
+use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind, Url};
 
 use crate::utils::koto_span_to_lsp_range;
 
@@ -16,27 +16,29 @@ pub struct SourceInfo {
 }
 
 impl SourceInfo {
-    pub fn from_ast(ast: &Ast) -> Self {
-        SourceInfoBuilder::from_ast(ast).build()
+    pub fn from_ast(ast: &Ast, uri: Arc<Url>) -> Self {
+        SourceInfoBuilder::from_ast(ast, uri).build()
     }
 
-    pub fn get_definition_range(
+    pub fn get_definition_location(
         &self,
         position: Position,
         include_references: bool,
-    ) -> Option<Range> {
+    ) -> Option<Location> {
         self.definitions
-            .binary_search_by(|definition| cmp_position_to_range(position, &definition.range))
+            .binary_search_by(|definition| {
+                cmp_position_to_range(position, &definition.location.range)
+            })
             .ok()
-            .map(|i| self.definitions[i].range)
+            .map(|i| self.definitions[i].location.clone())
             .or_else(|| {
                 if include_references {
                     self.references
                         .binary_search_by(|reference| {
-                            cmp_position_to_range(position, &reference.range)
+                            cmp_position_to_range(position, &reference.location.range)
                         })
                         .ok()
-                        .map(|i| self.references[i].definition)
+                        .map(|i| self.references[i].definition.clone())
                 } else {
                     None
                 }
@@ -48,7 +50,7 @@ impl SourceInfo {
         position: Position,
         include_definition: bool,
     ) -> Option<FindReferencesIter> {
-        self.get_definition_range(position, true)
+        self.get_definition_location(position, true)
             .map(|definition| FindReferencesIter {
                 definition,
                 references: self.references.iter(),
@@ -63,24 +65,48 @@ impl SourceInfo {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Location {
+    pub uri: Arc<Url>,
+    pub range: Range,
+}
+
+impl Location {
+    fn new(uri: Arc<Url>, span: Span) -> Self {
+        Self {
+            uri,
+            range: koto_span_to_lsp_range(span),
+        }
+    }
+}
+
+impl From<Location> for tower_lsp::lsp_types::Location {
+    fn from(value: Location) -> Self {
+        Self {
+            uri: value.uri.as_ref().clone(),
+            range: value.range,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct FindReferencesIter<'a> {
-    definition: Range,
+    definition: Location,
     references: std::slice::Iter<'a, Reference>,
     include_definition: bool,
 }
 
 impl<'a> Iterator for FindReferencesIter<'a> {
-    type Item = Range;
+    type Item = Location;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.include_definition {
             self.include_definition = false;
-            Some(self.definition)
+            Some(self.definition.clone())
         } else {
             for reference in self.references.by_ref() {
                 if reference.definition == self.definition {
-                    return Some(reference.range);
+                    return Some(reference.location.clone());
                 }
             }
             None
@@ -100,7 +126,7 @@ fn cmp_position_to_range(position: Position, range: &Range) -> Ordering {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Definition {
-    range: Range,
+    location: Location,
     id: StringSlice,
     kind: SymbolKind,
     // true for definitions at the top-level of the script, i.e. not in a function
@@ -111,13 +137,13 @@ pub struct Definition {
 impl Definition {
     fn new(
         id: StringSlice,
-        span: Span,
+        location: Location,
         kind: SymbolKind,
         top_level: bool,
         children: Vec<Definition>,
     ) -> Self {
         Self {
-            range: koto_span_to_lsp_range(span),
+            location,
             id,
             kind,
             top_level,
@@ -131,21 +157,21 @@ impl Definition {
 }
 
 impl From<&Definition> for DocumentSymbol {
-    fn from(value: &Definition) -> Self {
-        let children = value
+    fn from(definition: &Definition) -> Self {
+        let children = definition
             .children
             .as_ref()
             .map(|children| children.iter().map(DocumentSymbol::from).collect());
 
         #[allow(deprecated)]
         Self {
-            name: value.id.as_str().into(),
+            name: definition.id.as_str().into(),
             detail: None,
-            kind: value.kind,
+            kind: definition.kind,
             tags: None,
             deprecated: None,
-            range: value.range,
-            selection_range: value.range,
+            range: definition.location.range,
+            selection_range: definition.location.range,
             children,
         }
     }
@@ -153,21 +179,35 @@ impl From<&Definition> for DocumentSymbol {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reference {
-    pub range: Range,
-    pub definition: Range,
+    pub location: Location,
+    pub definition: Location,
     pub id: StringSlice,
 }
 
-#[derive(Default)]
 struct SourceInfoBuilder {
+    // The uri of the file that is being scanned
+    uri: Arc<Url>,
+    // A stack of frames, each time a function is encountered a new frame is added to the stack
     frames: Vec<Frame>,
+    // All definitions that have been found in the file.
+    //
+    // Definitions are collected in frames and then appended to this vec when the frame is popped
+    // off the stack. This results in an unsorted ordering, so the definitions get sorted in the
+    // build function.
     definitions: Vec<Definition>,
+    // All references that have been found in the file.
+    // The references get added as soon as they're encountered in the AST, so they're always sorted.
     references: Vec<Reference>,
 }
 
 impl SourceInfoBuilder {
-    fn from_ast(ast: &Ast) -> Self {
-        let mut result = Self::default();
+    fn from_ast(ast: &Ast, uri: Arc<Url>) -> Self {
+        let mut result = Self {
+            uri,
+            frames: Vec::new(),
+            definitions: Vec::new(),
+            references: Vec::new(),
+        };
 
         if let Some(entry_point) = ast.entry_point() {
             result.visit_node(entry_point, Context::new(ast));
@@ -179,12 +219,12 @@ impl SourceInfoBuilder {
     fn build(mut self) -> SourceInfo {
         // Sort the definitions, they get added in pop_frame so they aren't in order
         self.definitions
-            .sort_by_key(|definition| definition.range.start);
+            .sort_by_key(|definition| definition.location.range.start);
 
         // References should already be sorted
         debug_assert!(is_sorted::IsSorted::is_sorted_by_key(
             &mut self.references.iter(),
-            |reference| reference.range.start
+            |reference| reference.location.range.start
         ));
 
         SourceInfo {
@@ -387,7 +427,7 @@ impl SourceInfoBuilder {
                     } else {
                         child_definitions.push(Definition::new(
                             ctx.string(*id),
-                            *ctx.ast.span(key_node.span),
+                            Location::new(self.uri.clone(), *ctx.ast.span(key_node.span)),
                             SymbolKind::FIELD,
                             self.frames.len() == 1, // TODO - use frame.is_top_level?
                             vec![],                 // TODO - nested child definitions?
@@ -401,7 +441,7 @@ impl SourceInfoBuilder {
                     };
                     child_definitions.push(Definition::new(
                         StringSlice::from(field_id),
-                        *ctx.ast.span(key_node.span),
+                        Location::new(self.uri.clone(), *ctx.ast.span(key_node.span)),
                         SymbolKind::FIELD,
                         self.frames.len() == 1, // TODO - use frame.is_top_level?
                         vec![],                 // TODO - nested child definitions?
@@ -545,7 +585,7 @@ impl SourceInfoBuilder {
         self.frames
             .last_mut()
             .expect("Missing frame")
-            .add_definition(id, *span, kind, children);
+            .add_definition(id, Location::new(self.uri.clone(), *span), kind, children);
     }
 
     fn add_reference(&mut self, id: ConstantIndex, node: &AstNode, ast: &Ast) {
@@ -554,8 +594,8 @@ impl SourceInfoBuilder {
             if let Some(definition) = frame.get_definition(&id) {
                 let span = ast.span(node.span);
                 self.references.push(Reference {
-                    range: koto_span_to_lsp_range(*span),
-                    definition: definition.range,
+                    location: Location::new(self.uri.clone(), *span),
+                    definition: definition.location.clone(),
                     id,
                 });
                 return;
@@ -586,12 +626,17 @@ impl Frame {
     fn add_definition(
         &mut self,
         id: StringSlice,
-        span: Span,
+        location: Location,
         kind: SymbolKind,
         children: Vec<Definition>,
     ) {
-        self.definitions
-            .push(Definition::new(id, span, kind, self.top_level, children));
+        self.definitions.push(Definition::new(
+            id,
+            location,
+            kind,
+            self.top_level,
+            children,
+        ));
     }
 
     fn get_definition(&self, id: &StringSlice) -> Option<&Definition> {
@@ -672,18 +717,22 @@ mod test {
         }
     }
 
+    fn test_uri() -> Arc<Url> {
+        Arc::new(Url::parse("file:///test.koto").unwrap())
+    }
+
     mod goto_definition {
         use super::*;
 
         fn goto_definition_test(script: &str, cases: &[(Position, Option<Range>)]) -> Result<()> {
             let ast = Parser::parse(script)?;
-            let info = SourceInfo::from_ast(&ast);
+            let info = SourceInfo::from_ast(&ast, test_uri());
 
             for (i, (position, expected)) in cases.iter().enumerate() {
-                let result = info.get_definition_range(*position, true);
-                match (expected, result) {
+                let result = info.get_definition_location(*position, true);
+                match (expected, &result) {
                     (Some(expected), Some(result)) => {
-                        assert_eq!(*expected, result, "mismatch in case {i}");
+                        assert_eq!(*expected, result.range, "mismatch in case {i}");
                     }
                     (None, None) => {}
                     _ => panic!(
@@ -753,7 +802,7 @@ f a
             cases: &[(Position, Option<&[Range]>, bool)],
         ) -> Result<()> {
             let ast = Parser::parse(script)?;
-            let info = SourceInfo::from_ast(&ast);
+            let info = SourceInfo::from_ast(&ast, test_uri());
 
             for (i, (position, expected_references, include_definition)) in cases.iter().enumerate()
             {
@@ -766,7 +815,10 @@ f a
                             .zip(references.clone())
                             .enumerate()
                         {
-                            assert_eq!(*expected, actual, "mismatch in case {i}, reference {j}");
+                            assert_eq!(
+                                *expected, actual.range,
+                                "mismatch in case {i}, reference {j}"
+                            );
                         }
 
                         assert_eq!(
@@ -1002,7 +1054,7 @@ x = |y| y.baz = bar
             expected_definitions: &[TestDefinition],
         ) -> Result<()> {
             let ast = Parser::parse(script)?;
-            let info = SourceInfo::from_ast(&ast);
+            let info = SourceInfo::from_ast(&ast, test_uri());
             let definitions = info.top_level_definitions().collect::<Vec<_>>();
 
             for (i, (expected, actual)) in expected_definitions
@@ -1010,7 +1062,10 @@ x = |y| y.baz = bar
                 .zip(definitions.iter())
                 .enumerate()
             {
-                assert_eq!(expected.range, actual.range, "mismatch in definition {i}");
+                assert_eq!(
+                    expected.range, actual.location.range,
+                    "mismatch in definition {i}"
+                );
                 assert_eq!(
                     expected.id,
                     actual.id.as_str(),
@@ -1026,7 +1081,7 @@ x = |y| y.baz = bar
                         .enumerate()
                     {
                         assert_eq!(
-                            expected_child.range, actual_child.range,
+                            expected_child.range, actual_child.location.range,
                             "mismatch in definition {i}, child {j}"
                         );
                         assert_eq!(
