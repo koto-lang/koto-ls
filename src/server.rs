@@ -140,7 +140,7 @@ impl LanguageServer for KotoServer {
             .lock()
             .await
             .get(&uri)
-            .and_then(|info| info.get_definition(position, true))
+            .and_then(|info| info.get_definition_range(position, true))
             .map(|definition| {
                 println!("Definition found: {definition:?}");
                 let location = Location {
@@ -195,10 +195,12 @@ impl LanguageServer for KotoServer {
         let uri = params.text_document.uri;
         let position = params.position;
 
-        let range = self.source_info.lock().await.get(&uri).and_then(|info| {
-            info.get_definition(position, false)
-                .or_else(|| info.get_reference(position, false))
-        });
+        let range = self
+            .source_info
+            .lock()
+            .await
+            .get(&uri)
+            .and_then(|info| info.get_definition_range(position, true));
 
         if let Some(range) = range {
             Ok(Some(PrepareRenameResponse::Range(range)))

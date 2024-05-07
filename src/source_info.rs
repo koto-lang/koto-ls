@@ -20,28 +20,23 @@ impl SourceInfo {
         SourceInfoBuilder::from_ast(ast).build()
     }
 
-    pub fn get_definition(&self, position: Position, include_references: bool) -> Option<Range> {
+    pub fn get_definition_range(
+        &self,
+        position: Position,
+        include_references: bool,
+    ) -> Option<Range> {
         self.definitions
             .binary_search_by(|definition| cmp_position_to_range(position, &definition.range))
             .ok()
             .map(|i| self.definitions[i].range)
             .or_else(|| {
                 if include_references {
-                    self.get_reference(position, false)
-                } else {
-                    None
-                }
-            })
-    }
-
-    pub fn get_reference(&self, position: Position, include_definitions: bool) -> Option<Range> {
-        self.references
-            .binary_search_by(|reference| cmp_position_to_range(position, &reference.range))
-            .ok()
-            .map(|i| self.references[i].definition)
-            .or_else(|| {
-                if include_definitions {
-                    self.get_definition(position, false)
+                    self.references
+                        .binary_search_by(|reference| {
+                            cmp_position_to_range(position, &reference.range)
+                        })
+                        .ok()
+                        .map(|i| self.references[i].definition)
                 } else {
                     None
                 }
@@ -53,7 +48,7 @@ impl SourceInfo {
         position: Position,
         include_definition: bool,
     ) -> Option<FindReferencesIter> {
-        self.get_definition(position, true)
+        self.get_definition_range(position, true)
             .map(|definition| FindReferencesIter {
                 definition,
                 references: self.references.iter(),
@@ -685,7 +680,7 @@ mod test {
             let info = SourceInfo::from_ast(&ast);
 
             for (i, (position, expected)) in cases.iter().enumerate() {
-                let result = info.get_definition(*position, true);
+                let result = info.get_definition_range(*position, true);
                 match (expected, result) {
                     (Some(expected), Some(result)) => {
                         assert_eq!(*expected, result, "mismatch in case {i}");
