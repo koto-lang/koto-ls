@@ -249,6 +249,7 @@ impl SourceInfoBuilder {
             | Node::RangeFull
             | Node::Continue
             | Node::Self_
+            | Node::Type(..)
             | Node::Wildcard(_) => {}
             // Nodes with a single child node that should be visited
             Node::Nested(node)
@@ -274,7 +275,7 @@ impl SourceInfoBuilder {
                     self.visit_node(*node, ctx.default());
                 }
             }
-            Node::Id(id) => {
+            Node::Id(id, _type_hint) => {
                 if ctx.id_is_definition {
                     self.add_definition(
                         ctx.string(*id),
@@ -408,7 +409,7 @@ impl SourceInfoBuilder {
             let key_node = ctx.node(*key);
             match &key_node.node {
                 Node::Str(s) => self.visit_string(s, ctx.default()),
-                Node::Id(id) => {
+                Node::Id(id, _type_hint) => {
                     // Shorthand syntax?
                     if value.is_none() {
                         self.add_reference(*id, key_node, ctx.ast);
@@ -461,7 +462,7 @@ impl SourceInfoBuilder {
         for (i, source) in from.iter().enumerate() {
             let source_node = ctx.node(*source);
             match &source_node.node {
-                Node::Id(id) => {
+                Node::Id(id, _type_hint) => {
                     if i == 0 {
                         self.add_reference(*id, source_node, ctx.ast);
                     }
@@ -473,7 +474,7 @@ impl SourceInfoBuilder {
         for item in items.iter() {
             let item_node = ctx.node(item.item);
             match (&item_node.node, item.name) {
-                (Node::Id(id), None) => self.add_definition(
+                (Node::Id(id, _type_hint), None) => self.add_definition(
                     ctx.string(*id),
                     SymbolKind::VARIABLE,
                     vec![],
@@ -483,7 +484,7 @@ impl SourceInfoBuilder {
                 (Node::Str(s), None) => self.visit_string(s, ctx.default()),
                 (_, Some(name)) => {
                     let name_node = ctx.node(name);
-                    if let Node::Id(id) = &name_node.node {
+                    if let Node::Id(id, _type_hint) = &name_node.node {
                         self.add_definition(
                             ctx.string(*id),
                             SymbolKind::VARIABLE,
@@ -501,7 +502,7 @@ impl SourceInfoBuilder {
     fn visit_assign(&mut self, target: AstIndex, expression: AstIndex, ctx: &Context) {
         let target_node = ctx.node(target);
         match &target_node.node {
-            Node::Id(id) => {
+            Node::Id(id, _type_hint) => {
                 // LHS is an id, so this is a definition
                 let kind = node_symbol_kind(&ctx.node(expression).node);
 
