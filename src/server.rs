@@ -1,3 +1,4 @@
+use crate::info_cache::InfoCache;
 use crate::source_info::SourceInfo;
 use crate::utils::{default, koto_span_to_lsp_range};
 use koto::bytecode::Compiler;
@@ -11,19 +12,28 @@ use tower_lsp::{Client, LanguageServer};
 
 pub struct KotoServer {
     client: Client,
-    source_info: Arc<Mutex<HashMap<Arc<Url>, SourceInfo>>>,
+    source_info: Arc<Mutex<InfoCache>>,
 }
 
 impl KotoServer {
     pub fn new(client: Client) -> Self {
         Self {
             client,
-            source_info: Arc::new(Mutex::new(HashMap::default())),
+            source_info: Arc::new(Mutex::new(InfoCache::default())),
         }
     }
 
     async fn compile(&self, script: &str, uri: Url, version: i32) {
-        self.source_info.lock().await.remove(&uri);
+        if self
+            .source_info
+            .lock()
+            .await
+            .get_versioned(&uri, version.into())
+            .is_some()
+        {
+            return;
+        }
+
         let ast = match Parser::parse(script) {
             Ok(ast) => ast,
             Err(e) => {
@@ -41,10 +51,11 @@ impl KotoServer {
             .publish_diagnostics(uri.clone(), vec![], Some(version))
             .await;
         let uri = Arc::new(uri);
-        self.source_info
-            .lock()
-            .await
-            .insert(uri.clone(), SourceInfo::from_ast(&ast, uri));
+        self.source_info.lock().await.insert(
+            uri.clone(),
+            version.into(),
+            SourceInfo::from_ast(&ast, uri),
+        );
     }
 
     async fn report_koto_error(&self, span: Span, message: String, uri: Url, version: i32) {
