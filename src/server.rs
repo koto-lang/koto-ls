@@ -51,11 +51,13 @@ impl KotoServer {
             .publish_diagnostics(uri.clone(), vec![], Some(version))
             .await;
         let uri = Arc::new(uri);
-        self.source_info.lock().await.insert(
-            uri.clone(),
-            version.into(),
-            SourceInfo::from_ast(&ast, uri),
-        );
+        let mut info_cache = self.source_info.lock().await;
+        let info = SourceInfo::from_ast(&ast, uri.clone(), &mut info_cache);
+        info_cache.insert(uri.clone(), version.into(), info);
+
+        self.client
+            .log_message(MessageType::INFO, format!("Info cache: {info_cache:?}"))
+            .await;
     }
 
     async fn report_koto_error(&self, span: Span, message: String, uri: Url, version: i32) {
@@ -152,7 +154,7 @@ impl LanguageServer for KotoServer {
             .lock()
             .await
             .get(&uri)
-            .and_then(|info| info.get_definition_location(position, true))
+            .and_then(|info| info.get_definition_location(position))
             .map(|definition| {
                 println!("Definition found: {definition:?}");
                 GotoDefinitionResponse::Scalar(definition.into())
@@ -172,12 +174,15 @@ impl LanguageServer for KotoServer {
         let position = params.text_document_position.position;
         let include_declaration = params.context.include_declaration;
 
-        let result = self
-            .source_info
-            .lock()
-            .await
-            .get(&uri)
-            .and_then(|info| info.find_references(position, include_declaration))
+        let Some(info) = self.source_info.lock().await.get(&uri) else {
+            self.client
+                .log_message(MessageType::ERROR, "No references found")
+                .await;
+            return Err(Error::invalid_params("No source information available"));
+        };
+
+        let result = info
+            .find_references(position, include_declaration)
             .map(|references| references.map(Location::from).collect());
 
         if result.is_none() {
@@ -201,7 +206,7 @@ impl LanguageServer for KotoServer {
             .lock()
             .await
             .get(&uri)
-            .and_then(|info| info.get_definition_location(position, true));
+            .and_then(|info| info.get_definition_location(position));
 
         if let Some(location) = location {
             Ok(Some(PrepareRenameResponse::Range(location.range)))

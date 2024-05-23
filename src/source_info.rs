@@ -1,11 +1,27 @@
-use koto::parser::{
-    Ast, AstIndex, AstNode, AstString, ChainNode, ConstantIndex, ImportItem, Node, Span,
-    StringContents, StringNode, StringSlice,
+use koto::{
+    bytecode::Compiler,
+    parser::{
+        Ast, AstIndex, AstNode, AstString, ChainNode, ConstantIndex, ImportItem, Node, Parser,
+        Span, StringContents, StringNode, StringSlice,
+    },
 };
-use std::{cmp::Ordering, sync::Arc};
+use std::{cmp::Ordering, fs, sync::Arc};
+use thiserror::Error;
 use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind, Url};
 
-use crate::utils::koto_span_to_lsp_range;
+use crate::{
+    info_cache::InfoCache,
+    utils::{default, koto_span_to_lsp_range},
+};
+
+#[derive(Error, Clone, Debug)]
+pub enum Error {
+    #[error(transparent)]
+    Parser(#[from] koto::parser::Error),
+    #[error(transparent)]
+    Compiler(#[from] koto::bytecode::CompilerError),
+}
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourceInfo {
@@ -16,32 +32,30 @@ pub struct SourceInfo {
 }
 
 impl SourceInfo {
-    pub fn from_ast(ast: &Ast, uri: Arc<Url>) -> Self {
-        SourceInfoBuilder::from_ast(ast, uri).build()
+    pub fn from_script(script: &str, uri: Arc<Url>, info_cache: &mut InfoCache) -> Result<Self> {
+        let ast = Parser::parse(script)?;
+        Compiler::compile(&ast, default())?;
+        Ok(Self::from_ast(&ast, uri, info_cache))
     }
 
-    pub fn get_definition_location(
-        &self,
-        position: Position,
-        include_references: bool,
-    ) -> Option<Location> {
-        self.definitions
-            .binary_search_by(|definition| {
-                cmp_position_to_range(position, &definition.location.range)
+    pub fn from_ast(ast: &Ast, uri: Arc<Url>, info_cache: &mut InfoCache) -> Self {
+        SourceInfoBuilder::from_ast(ast, uri, info_cache).build()
+    }
+
+    pub fn get_definition_location(&self, position: Position) -> Option<Location> {
+        self.references
+            .binary_search_by(|reference| {
+                cmp_position_to_range(position, &reference.location.range)
             })
             .ok()
-            .map(|i| self.definitions[i].location.clone())
+            .map(|i| self.references[i].definition.clone())
             .or_else(|| {
-                if include_references {
-                    self.references
-                        .binary_search_by(|reference| {
-                            cmp_position_to_range(position, &reference.location.range)
-                        })
-                        .ok()
-                        .map(|i| self.references[i].definition.clone())
-                } else {
-                    None
-                }
+                self.definitions
+                    .binary_search_by(|definition| {
+                        cmp_position_to_range(position, &definition.location.range)
+                    })
+                    .ok()
+                    .map(|i| self.definitions[i].location.clone())
             })
     }
 
@@ -50,7 +64,7 @@ impl SourceInfo {
         position: Position,
         include_definition: bool,
     ) -> Option<FindReferencesIter> {
-        self.get_definition_location(position, true)
+        self.get_definition_location(position)
             .map(|definition| FindReferencesIter {
                 definition,
                 references: self.references.iter(),
@@ -184,9 +198,12 @@ pub struct Reference {
     pub id: StringSlice,
 }
 
-struct SourceInfoBuilder {
+struct SourceInfoBuilder<'i> {
     // The uri of the file that is being scanned
     uri: Arc<Url>,
+    // A cache that is used when importing modules
+    #[allow(unused)]
+    info_cache: &'i mut InfoCache,
     // A stack of frames, each time a function is encountered a new frame is added to the stack
     frames: Vec<Frame>,
     // All definitions that have been found in the file.
@@ -200,10 +217,11 @@ struct SourceInfoBuilder {
     references: Vec<Reference>,
 }
 
-impl SourceInfoBuilder {
-    fn from_ast(ast: &Ast, uri: Arc<Url>) -> Self {
+impl<'i> SourceInfoBuilder<'i> {
+    fn from_ast(ast: &Ast, uri: Arc<Url>, info_cache: &'i mut InfoCache) -> Self {
         let mut result = Self {
             uri,
+            info_cache,
             frames: Vec::new(),
             definitions: Vec::new(),
             references: Vec::new(),
@@ -459,44 +477,168 @@ impl SourceInfoBuilder {
     }
 
     fn visit_import(&mut self, from: &[AstIndex], items: &[ImportItem], ctx: &Context) {
-        for (i, source) in from.iter().enumerate() {
-            let source_node = ctx.node(*source);
-            match &source_node.node {
+        let mut maybe_module: Option<Arc<SourceInfo>> = None;
+
+        // from ...
+        for (i, from_index) in from.iter().enumerate() {
+            let from_node = ctx.node(*from_index);
+            match &from_node.node {
                 Node::Id(id, _type_hint) => {
+                    let id_string = ctx.string(*id);
                     if i == 0 {
-                        self.add_reference(*id, source_node, ctx.ast);
+                        // check for matching definition
+                        if self.get_definition(id_string.as_str()).is_some() {
+                            // The module name was defined earlier in the script, so add a reference
+                            self.add_reference(*id, from_node, ctx.ast);
+                        } else if let Some(module_url) = self.find_module(id_string.as_str()) {
+                            self.analyze_module(module_url.clone());
+                            maybe_module = self.info_cache.get(&module_url);
+                            if maybe_module.is_some() {
+                                // The module was successfully analyzed, so add a reference
+                                self.add_reference_with_definition(
+                                    id_string,
+                                    *ctx.span(from_node),
+                                    Location::new(module_url.clone(), Span::default()),
+                                );
+                            }
+                        }
+                    } else if let Some(module) = &maybe_module {
+                        if let Some(definition) = module
+                            .top_level_definitions()
+                            .find(|definition| definition.id.as_str() == id_string.as_str())
+                        {
+                            // Add a reference here to enable go-to-definition
+                            self.add_reference_with_definition(
+                                id_string,
+                                *ctx.span(from_node),
+                                definition.location.clone(),
+                            );
+                        }
+                        maybe_module = None;
                     }
                 }
                 Node::Str(s) => self.visit_string(s, ctx.default()),
                 _ => {}
             }
         }
+
+        // import ...
         for item in items.iter() {
             let item_node = ctx.node(item.item);
             match (&item_node.node, item.name) {
-                (Node::Id(id, _type_hint), None) => self.add_definition(
-                    ctx.string(*id),
-                    SymbolKind::VARIABLE,
-                    vec![],
-                    item_node,
-                    ctx.ast,
-                ),
-                (Node::Str(s), None) => self.visit_string(s, ctx.default()),
-                (_, Some(name)) => {
-                    let name_node = ctx.node(name);
-                    if let Node::Id(id, _type_hint) = &name_node.node {
-                        self.add_definition(
-                            ctx.string(*id),
-                            SymbolKind::VARIABLE,
-                            vec![],
-                            name_node,
-                            ctx.ast,
-                        )
+                (Node::Id(id, _), maybe_as) => {
+                    let id_string = ctx.string(*id);
+                    let (as_string, as_node) = if let Some(as_index) = maybe_as {
+                        let as_node = ctx.node(as_index);
+                        let Node::Id(as_id, _) = &as_node.node else {
+                            unreachable!("TODO - return error")
+                        };
+                        (Some(ctx.string(*as_id)), Some(as_node))
+                    } else {
+                        (None, None)
+                    };
+
+                    if let Some(module) = &maybe_module {
+                        if let Some(definition) = module
+                            .top_level_definitions()
+                            .find(|definition| definition.id.as_str() == id_string.as_str())
+                        {
+                            // If an alias is used, then also add a definition for the alias
+                            self.add_imported_definition(definition.clone(), as_string.clone());
+                            // Also add a reference here to enable go-to-definition
+                            self.add_reference_with_definition(
+                                id_string,
+                                *ctx.span(item_node),
+                                definition.location.clone(),
+                            );
+                            if let Some(as_node) = as_node {
+                                // ...and also a reference for the alias
+                                self.add_reference_with_definition(
+                                    as_string.unwrap(), // as_string is defined with as_node
+                                    *ctx.span(as_node),
+                                    definition.location.clone(),
+                                );
+                            }
+                            continue;
+                        }
+                    } else if from.is_empty() {
+                        // `from` wasn't used, so the import item is a module
+                        // check for matching definition
+                        let module_name = ctx.string(*id);
+
+                        if self.get_definition(module_name.as_str()).is_some() {
+                            // The module name was defined earlier in the script, so add a reference
+                            self.add_reference(*id, item_node, ctx.ast);
+                        } else if let Some(module_url) = self.find_module(module_name.as_str()) {
+                            self.analyze_module(module_url.clone());
+                            if self.info_cache.get(&module_url).is_some() {
+                                // The module was successfully analyzed, so add a reference
+                                let module_location =
+                                    Location::new(module_url.clone(), Span::default());
+                                self.add_reference_with_definition(
+                                    module_name,
+                                    *ctx.span(item_node),
+                                    module_location.clone(),
+                                );
+                                if let Some(as_node) = as_node {
+                                    // ...and also a reference for the alias
+                                    self.add_reference_with_definition(
+                                        as_string.clone().unwrap(), // as_string is defined with as_node
+                                        *ctx.span(as_node),
+                                        module_location,
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    // Add a local definition for the imported item
+                    let name = as_string.unwrap_or(id_string);
+                    let name_node = as_node.unwrap_or(item_node);
+                    self.add_definition(name, SymbolKind::VARIABLE, vec![], name_node, ctx.ast)
+                }
+                (Node::Str(s), maybe_as) => {
+                    self.visit_string(s, ctx.default());
+                    if let Some(name) = maybe_as {
+                        let name_node = ctx.node(name);
+                        if let Node::Id(id, _type_hint) = &name_node.node {
+                            self.add_definition(
+                                ctx.string(*id),
+                                SymbolKind::VARIABLE,
+                                vec![],
+                                name_node,
+                                ctx.ast,
+                            )
+                        }
                     }
                 }
                 _ => {}
             }
         }
+    }
+
+    fn analyze_module(&mut self, url: Arc<Url>) {
+        let Ok(path) = url.to_file_path() else { return };
+        let Ok(metadata) = fs::metadata(&path) else {
+            return;
+        };
+        let Ok(modified_time) = metadata.modified() else {
+            return;
+        };
+        if self
+            .info_cache
+            .get_versioned(&url, modified_time.into())
+            .is_some()
+        {
+            return;
+        }
+        let Ok(script) = fs::read_to_string(&path) else {
+            return;
+        };
+        let Ok(info) = SourceInfo::from_script(&script, url.clone(), self.info_cache) else {
+            return;
+        };
+        self.info_cache.insert(url, modified_time.into(), info);
     }
 
     fn visit_assign(&mut self, target: AstIndex, expression: AstIndex, ctx: &Context) {
@@ -574,6 +716,15 @@ impl SourceInfoBuilder {
         }
     }
 
+    fn get_definition(&self, id: &str) -> Option<&Definition> {
+        for frame in self.frames.iter().rev() {
+            if let Some(definition) = frame.get_definition(id) {
+                return Some(definition);
+            }
+        }
+        None
+    }
+
     fn add_definition(
         &mut self,
         id: StringSlice,
@@ -589,24 +740,47 @@ impl SourceInfoBuilder {
             .add_definition(id, Location::new(self.uri.clone(), *span), kind, children);
     }
 
+    fn add_imported_definition(&mut self, definition: Definition, alias: Option<StringSlice>) {
+        self.frames
+            .last_mut()
+            .expect("Missing frame")
+            .add_imported_definition(definition, alias);
+    }
+
     fn add_reference(&mut self, id: ConstantIndex, node: &AstNode, ast: &Ast) {
         let id = ast.constants().get_string_slice(id);
-        for frame in self.frames.iter().rev() {
-            if let Some(definition) = frame.get_definition(&id) {
-                let span = ast.span(node.span);
-                self.references.push(Reference {
-                    location: Location::new(self.uri.clone(), *span),
-                    definition: definition.location.clone(),
-                    id,
-                });
-                return;
-            }
-        }
+
+        let Some(definition) = self.get_definition(id.as_str()) else {
+            return;
+        };
+
+        let span = ast.span(node.span);
+        let location = definition.location.clone();
+        self.add_reference_with_definition(id, *span, location);
+    }
+
+    fn add_reference_with_definition(&mut self, id: StringSlice, span: Span, definition: Location) {
+        self.references.push(Reference {
+            location: Location::new(self.uri.clone(), span),
+            definition,
+            id,
+        });
+    }
+
+    fn find_module(&self, name: &str) -> Option<Arc<Url>> {
+        let Ok(path) = koto::bytecode::find_module(name, None) else {
+            return None;
+        };
+        let Ok(url) = Url::from_file_path(path) else {
+            return None;
+        };
+        Some(Arc::new(url))
     }
 
     fn push_frame(&mut self, locals_capacity: usize) {
         self.frames.push(Frame {
             definitions: Vec::with_capacity(locals_capacity),
+            imported_definitions: Vec::new(),
             top_level: self.frames.is_empty(),
         });
     }
@@ -620,6 +794,7 @@ impl SourceInfoBuilder {
 #[derive(Default, Debug)]
 struct Frame {
     definitions: Vec<Definition>,
+    imported_definitions: Vec<(Definition, Option<StringSlice>)>,
     top_level: bool,
 }
 
@@ -640,11 +815,28 @@ impl Frame {
         ));
     }
 
-    fn get_definition(&self, id: &StringSlice) -> Option<&Definition> {
+    fn add_imported_definition(&mut self, definition: Definition, alias: Option<StringSlice>) {
+        self.imported_definitions.push((definition, alias));
+    }
+
+    fn get_definition(&self, id: &str) -> Option<&Definition> {
         self.definitions
             .iter()
             .rev() // reversed so that the most recent matching definition is found
-            .find(|definition| definition.id == *id)
+            .find(|definition| definition.id.as_str() == id)
+            .or_else(|| {
+                self.imported_definitions
+                    .iter()
+                    .rev()
+                    .find(|(definition, alias)| {
+                        if let Some(alias) = alias {
+                            alias.as_str() == id
+                        } else {
+                            definition.id.as_str() == id
+                        }
+                    })
+                    .map(|(definition, _)| definition)
+            })
     }
 }
 
@@ -682,6 +874,10 @@ impl<'a> Context<'a> {
 
     fn string(&self, constant_index: ConstantIndex) -> StringSlice {
         self.ast.constants().get_string_slice(constant_index)
+    }
+
+    fn span(&self, node: &AstNode) -> &Span {
+        self.ast.span(node.span)
     }
 }
 
@@ -727,10 +923,11 @@ mod test {
 
         fn goto_definition_test(script: &str, cases: &[(Position, Option<Range>)]) -> Result<()> {
             let ast = Parser::parse(script)?;
-            let info = SourceInfo::from_ast(&ast, test_uri());
+            let mut info_cache = InfoCache::default();
+            let info = SourceInfo::from_ast(&ast, test_uri(), &mut info_cache);
 
             for (i, (position, expected)) in cases.iter().enumerate() {
-                let result = info.get_definition_location(*position, true);
+                let result = info.get_definition_location(*position);
                 match (expected, &result) {
                     (Some(expected), Some(result)) => {
                         assert_eq!(*expected, result.range, "mismatch in case {i}");
@@ -803,7 +1000,8 @@ f a
             cases: &[(Position, Option<&[Range]>, bool)],
         ) -> Result<()> {
             let ast = Parser::parse(script)?;
-            let info = SourceInfo::from_ast(&ast, test_uri());
+            let mut info_cache = InfoCache::default();
+            let info = SourceInfo::from_ast(&ast, test_uri(), &mut info_cache);
 
             for (i, (position, expected_references, include_definition)) in cases.iter().enumerate()
             {
@@ -824,8 +1022,8 @@ f a
 
                         assert_eq!(
                             expected_references.len(),
-                            references.count(),
-                            "reference count mismatch in case {i}"
+                            references.clone().count(),
+                            "reference count mismatch in case {i}",
                         );
                     }
                     (None, None) => {}
@@ -1010,14 +1208,14 @@ from baz import foo
         #[test]
         fn capture_of_imported_item() -> Result<()> {
             let script = "\
-from foo import bar
+from some_other_module import bar
 x = |y| y.baz = bar
 ";
             find_references_test(
                 script,
                 &[(
-                    position(0, 17), // bar
-                    Some(&[range(0, 16, 3), range(1, 16, 3)]),
+                    position(0, 31), // bar
+                    Some(&[range(0, 30, 3), range(1, 16, 3)]),
                     true,
                 )],
             )
@@ -1055,7 +1253,8 @@ x = |y| y.baz = bar
             expected_definitions: &[TestDefinition],
         ) -> Result<()> {
             let ast = Parser::parse(script)?;
-            let info = SourceInfo::from_ast(&ast, test_uri());
+            let mut info_cache = InfoCache::default();
+            let info = SourceInfo::from_ast(&ast, test_uri(), &mut info_cache);
             let definitions = info.top_level_definitions().collect::<Vec<_>>();
 
             for (i, (expected, actual)) in expected_definitions

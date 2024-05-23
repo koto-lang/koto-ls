@@ -2,34 +2,41 @@ use crate::source_info::SourceInfo;
 use std::{collections::HashMap, sync::Arc, time::SystemTime};
 use tower_lsp::lsp_types::Url;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct InfoCache {
     entries: HashMap<Arc<Url>, Info>,
 }
 
 impl InfoCache {
     pub fn insert(&mut self, url: Arc<Url>, version: Version, info: SourceInfo) {
-        self.entries.insert(url, Info { info, version });
+        self.entries.insert(
+            url,
+            Info {
+                info: Arc::new(info),
+                version,
+            },
+        );
     }
 
-    pub fn get(&self, url: &Url) -> Option<&SourceInfo> {
-        self.entries.get(url).map(|info| &info.info)
+    pub fn get(&self, url: &Url) -> Option<Arc<SourceInfo>> {
+        self.entries.get(url).map(|info| info.info.clone())
     }
 
-    pub fn get_versioned(&self, url: &Url, version: Version) -> Option<&SourceInfo> {
+    pub fn get_versioned(&self, url: &Url, version: Version) -> Option<Arc<SourceInfo>> {
         match self.entries.get(url) {
-            Some(info) if info.version == version => Some(&info.info),
+            Some(info) if info.version == version => Some(info.info.clone()),
             _ => None,
         }
     }
 }
 
+#[derive(Debug)]
 pub struct Info {
-    pub info: SourceInfo,
+    pub info: Arc<SourceInfo>,
     pub version: Version,
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Version {
     I32(i32),
     Timestamp(SystemTime),
