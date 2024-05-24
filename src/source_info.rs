@@ -273,7 +273,7 @@ impl<'i> SourceInfoBuilder<'i> {
             | Node::Continue
             | Node::Self_
             | Node::Type(..)
-            | Node::Wildcard(_) => {}
+            | Node::Wildcard(..) => {}
             // Nodes with a single child node that should be visited
             Node::Nested(node)
             | Node::RangeFrom { start: node }
@@ -510,7 +510,7 @@ impl<'i> SourceInfoBuilder<'i> {
                     } else if let Some(module) = &maybe_module {
                         if let Some(definition) = module
                             .top_level_definitions()
-                            .find(|definition| definition.id.as_str() == id_string.as_str())
+                            .find(|definition| definition.id == id_string)
                         {
                             // Add a reference here to enable go-to-definition
                             self.add_reference_with_definition(
@@ -546,7 +546,7 @@ impl<'i> SourceInfoBuilder<'i> {
                     if let Some(module) = &maybe_module {
                         if let Some(definition) = module
                             .top_level_definitions()
-                            .find(|definition| definition.id.as_str() == id_string.as_str())
+                            .find(|definition| definition.id == id_string)
                         {
                             // If an alias is used, then also add a definition for the alias
                             self.add_imported_definition(definition.clone(), as_string.clone());
