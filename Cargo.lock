@@ -351,6 +351,7 @@ dependencies = [
 [[package]]
 name = "koto"
 version = "0.15.0"
+source = "git+https://github.com/koto-lang/koto#cfc98bfa11891cf2ac735d9af86ce7e55a27508f"
 dependencies = [
  "dunce",
  "koto_bytecode",
@@ -375,6 +376,7 @@ dependencies = [
 [[package]]
 name = "koto_bytecode"
 version = "0.15.0"
+source = "git+https://github.com/koto-lang/koto#cfc98bfa11891cf2ac735d9af86ce7e55a27508f"
 dependencies = [
  "dunce",
  "koto_memory",
@@ -387,6 +389,7 @@ dependencies = [
 [[package]]
 name = "koto_derive"
 version = "0.15.0"
+source = "git+https://github.com/koto-lang/koto#cfc98bfa11891cf2ac735d9af86ce7e55a27508f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -396,6 +399,7 @@ dependencies = [
 [[package]]
 name = "koto_lexer"
 version = "0.15.0"
+source = "git+https://github.com/koto-lang/koto#cfc98bfa11891cf2ac735d9af86ce7e55a27508f"
 dependencies = [
  "unicode-segmentation",
  "unicode-width",
@@ -405,6 +409,7 @@ dependencies = [
 [[package]]
 name = "koto_memory"
 version = "0.15.0"
+source = "git+https://github.com/koto-lang/koto#cfc98bfa11891cf2ac735d9af86ce7e55a27508f"
 dependencies = [
  "parking_lot",
 ]
@@ -412,6 +417,7 @@ dependencies = [
 [[package]]
 name = "koto_parser"
 version = "0.15.0"
+source = "git+https://github.com/koto-lang/koto#cfc98bfa11891cf2ac735d9af86ce7e55a27508f"
 dependencies = [
  "koto_lexer",
  "koto_memory",
@@ -422,6 +428,7 @@ dependencies = [
 [[package]]
 name = "koto_runtime"
 version = "0.15.0"
+source = "git+https://github.com/koto-lang/koto#cfc98bfa11891cf2ac735d9af86ce7e55a27508f"
 dependencies = [
  "chrono",
  "downcast-rs",
