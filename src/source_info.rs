@@ -23,6 +23,15 @@ pub enum Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
+impl Error {
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            Error::Parser(e) => Some(e.span),
+            Error::Compiler(e) => Some(e.span),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourceInfo {
     // A vec of all definitions, sorted by start position
@@ -32,14 +41,10 @@ pub struct SourceInfo {
 }
 
 impl SourceInfo {
-    pub fn from_script(script: &str, uri: Arc<Url>, info_cache: &mut InfoCache) -> Result<Self> {
+    pub fn new(script: &str, uri: Arc<Url>, info_cache: &mut InfoCache) -> Result<Self> {
         let ast = Parser::parse(script)?;
         Compiler::compile(&ast, default())?;
-        Ok(Self::from_ast(&ast, uri, info_cache))
-    }
-
-    pub fn from_ast(ast: &Ast, uri: Arc<Url>, info_cache: &mut InfoCache) -> Self {
-        SourceInfoBuilder::from_ast(ast, uri, info_cache).build()
+        Ok(SourceInfoBuilder::from_ast(&ast, uri, info_cache).build())
     }
 
     pub fn get_definition_location(&self, position: Position) -> Option<Location> {
@@ -635,7 +640,7 @@ impl<'i> SourceInfoBuilder<'i> {
         let Ok(script) = fs::read_to_string(&path) else {
             return;
         };
-        let Ok(info) = SourceInfo::from_script(&script, url.clone(), self.info_cache) else {
+        let Ok(info) = SourceInfo::new(&script, url.clone(), self.info_cache) else {
             return;
         };
         self.info_cache.insert(url, modified_time.into(), info);
@@ -900,7 +905,6 @@ fn node_symbol_kind(node: &Node) -> SymbolKind {
 mod test {
     use super::*;
     use anyhow::Result;
-    use koto::parser::Parser;
     use tower_lsp::lsp_types::Position;
 
     fn position(line: u32, character: u32) -> Position {
@@ -922,9 +926,8 @@ mod test {
         use super::*;
 
         fn goto_definition_test(script: &str, cases: &[(Position, Option<Range>)]) -> Result<()> {
-            let ast = Parser::parse(script)?;
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::from_ast(&ast, test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script, test_uri(), &mut info_cache)?;
 
             for (i, (position, expected)) in cases.iter().enumerate() {
                 let result = info.get_definition_location(*position);
@@ -999,9 +1002,8 @@ f a
             script: &str,
             cases: &[(Position, Option<&[Range]>, bool)],
         ) -> Result<()> {
-            let ast = Parser::parse(script)?;
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::from_ast(&ast, test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script, test_uri(), &mut info_cache)?;
 
             for (i, (position, expected_references, include_definition)) in cases.iter().enumerate()
             {
@@ -1252,9 +1254,8 @@ x = |y| y.baz = bar
             script: &str,
             expected_definitions: &[TestDefinition],
         ) -> Result<()> {
-            let ast = Parser::parse(script)?;
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::from_ast(&ast, test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script, test_uri(), &mut info_cache)?;
             let definitions = info.top_level_definitions().collect::<Vec<_>>();
 
             for (i, (expected, actual)) in expected_definitions

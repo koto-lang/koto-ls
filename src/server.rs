@@ -1,8 +1,7 @@
 use crate::info_cache::InfoCache;
 use crate::source_info::SourceInfo;
 use crate::utils::{default, koto_span_to_lsp_range};
-use koto::bytecode::Compiler;
-use koto::parser::{Parser, Span};
+use koto::parser::Span;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -34,30 +33,26 @@ impl KotoServer {
             return;
         }
 
-        let ast = match Parser::parse(script) {
-            Ok(ast) => ast,
-            Err(e) => {
-                self.report_koto_error(e.span, e.error.to_string(), uri, version)
-                    .await;
-                return;
-            }
-        };
-        if let Err(e) = Compiler::compile(&ast, default()) {
-            self.report_koto_error(e.span, e.to_string(), uri, version)
-                .await;
-            return;
-        }
-        self.client
-            .publish_diagnostics(uri.clone(), vec![], Some(version))
-            .await;
-        let uri = Arc::new(uri);
+        let uri_arc = Arc::new(uri.clone());
         let mut info_cache = self.source_info.lock().await;
-        let info = SourceInfo::from_ast(&ast, uri.clone(), &mut info_cache);
-        info_cache.insert(uri.clone(), version.into(), info);
-
-        self.client
-            .log_message(MessageType::INFO, format!("Info cache: {info_cache:?}"))
-            .await;
+        match SourceInfo::new(script, uri_arc.clone(), &mut info_cache) {
+            Ok(info) => {
+                info_cache.insert(uri_arc, version.into(), info);
+                self.client
+                    .publish_diagnostics(uri.clone(), vec![], Some(version))
+                    .await;
+            }
+            Err(e) => {
+                if let Some(span) = e.span() {
+                    self.report_koto_error(span, e.to_string(), uri, version)
+                        .await;
+                } else {
+                    self.client
+                        .log_message(MessageType::ERROR, e.to_string())
+                        .await;
+                }
+            }
+        }
     }
 
     async fn report_koto_error(&self, span: Span, message: String, uri: Url, version: i32) {
