@@ -1076,6 +1076,34 @@ x = 42
         }
 
         #[test]
+        fn let_expression() -> Result<()> {
+            let script = "\
+let x: Number = 42
+1 + x
+";
+            find_references_test(
+                script,
+                &[
+                    (
+                        position(0, 4),
+                        Some(&[range(1, 4, 1)]),
+                        false,
+                    ),
+                    (
+                        position(0, 4),
+                        Some(&[range(0, 4, 1), range(1, 4, 1)]),
+                        true,
+                    ),
+                    (
+                        position(1, 4),
+                        Some(&[range(0, 4, 1), range(1, 4, 1)]),
+                        true,
+                    ),
+                ],
+            )
+        }
+
+        #[test]
         fn multiple_assignments() -> Result<()> {
             let script = "\
 a, b, c = 1, 2, 3

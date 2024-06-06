@@ -376,7 +376,7 @@ dependencies = [
 [[package]]
 name = "koto"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#c8b8234a8ef45615ddf7251549a38610e689ac16"
+source = "git+https://github.com/koto-lang/koto#36eecc0c371c49e09acd38b70c56a2a9826741d9"
 dependencies = [
  "dunce",
  "koto_bytecode",
@@ -401,7 +401,7 @@ dependencies = [
 [[package]]
 name = "koto_bytecode"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#c8b8234a8ef45615ddf7251549a38610e689ac16"
+source = "git+https://github.com/koto-lang/koto#36eecc0c371c49e09acd38b70c56a2a9826741d9"
 dependencies = [
  "derive-name",
  "dunce",
@@ -415,7 +415,7 @@ dependencies = [
 [[package]]
 name = "koto_derive"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#c8b8234a8ef45615ddf7251549a38610e689ac16"
+source = "git+https://github.com/koto-lang/koto#36eecc0c371c49e09acd38b70c56a2a9826741d9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -425,7 +425,7 @@ dependencies = [
 [[package]]
 name = "koto_lexer"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#c8b8234a8ef45615ddf7251549a38610e689ac16"
+source = "git+https://github.com/koto-lang/koto#36eecc0c371c49e09acd38b70c56a2a9826741d9"
 dependencies = [
  "unicode-segmentation",
  "unicode-width",
@@ -435,7 +435,7 @@ dependencies = [
 [[package]]
 name = "koto_memory"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#c8b8234a8ef45615ddf7251549a38610e689ac16"
+source = "git+https://github.com/koto-lang/koto#36eecc0c371c49e09acd38b70c56a2a9826741d9"
 dependencies = [
  "parking_lot",
 ]
@@ -443,11 +443,12 @@ dependencies = [
 [[package]]
 name = "koto_parser"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#c8b8234a8ef45615ddf7251549a38610e689ac16"
+source = "git+https://github.com/koto-lang/koto#36eecc0c371c49e09acd38b70c56a2a9826741d9"
 dependencies = [
  "derive-name",
  "koto_lexer",
  "koto_memory",
+ "smallvec",
  "thiserror",
  "unicode-segmentation",
 ]
@@ -455,7 +456,7 @@ dependencies = [
 [[package]]
 name = "koto_runtime"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#c8b8234a8ef45615ddf7251549a38610e689ac16"
+source = "git+https://github.com/koto-lang/koto#36eecc0c371c49e09acd38b70c56a2a9826741d9"
 dependencies = [
  "chrono",
  "downcast-rs",
