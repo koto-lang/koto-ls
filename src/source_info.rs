@@ -548,20 +548,27 @@ impl<'i> SourceInfoBuilder<'i> {
                             .top_level_definitions()
                             .find(|definition| definition.id == id_string)
                         {
-                            // If an alias is used, then also add a definition for the alias
-                            self.add_imported_definition(definition.clone(), as_string.clone());
+                            self.add_imported_definition(definition.clone());
                             // Also add a reference here to enable go-to-definition
                             self.add_reference_with_definition(
                                 id_string,
                                 *ctx.span(item_node),
                                 definition.location.clone(),
                             );
-                            if let Some(as_node) = as_node {
+                            if let (Some(as_node), Some(as_string)) = (as_node, as_string) {
                                 // ...and also a reference for the alias
                                 self.add_reference_with_definition(
-                                    as_string.unwrap(), // as_string is defined with as_node
+                                    as_string.clone(),
                                     *ctx.span(as_node),
                                     definition.location.clone(),
+                                );
+                                // Add a local definition for the alias
+                                self.add_definition(
+                                    as_string,
+                                    SymbolKind::VARIABLE,
+                                    vec![],
+                                    as_node,
+                                    ctx.ast,
                                 );
                             }
                             continue;
@@ -745,11 +752,11 @@ impl<'i> SourceInfoBuilder<'i> {
             .add_definition(id, Location::new(self.uri.clone(), *span), kind, children);
     }
 
-    fn add_imported_definition(&mut self, definition: Definition, alias: Option<StringSlice>) {
+    fn add_imported_definition(&mut self, definition: Definition) {
         self.frames
             .last_mut()
             .expect("Missing frame")
-            .add_imported_definition(definition, alias);
+            .add_imported_definition(definition);
     }
 
     fn add_reference(&mut self, id: ConstantIndex, node: &AstNode, ast: &Ast) {
@@ -799,7 +806,7 @@ impl<'i> SourceInfoBuilder<'i> {
 #[derive(Default, Debug)]
 struct Frame {
     definitions: Vec<Definition>,
-    imported_definitions: Vec<(Definition, Option<StringSlice>)>,
+    imported_definitions: Vec<Definition>,
     top_level: bool,
 }
 
@@ -820,8 +827,8 @@ impl Frame {
         ));
     }
 
-    fn add_imported_definition(&mut self, definition: Definition, alias: Option<StringSlice>) {
-        self.imported_definitions.push((definition, alias));
+    fn add_imported_definition(&mut self, definition: Definition) {
+        self.imported_definitions.push(definition);
     }
 
     fn get_definition(&self, id: &str) -> Option<&Definition> {
@@ -833,14 +840,7 @@ impl Frame {
                 self.imported_definitions
                     .iter()
                     .rev()
-                    .find(|(definition, alias)| {
-                        if let Some(alias) = alias {
-                            alias.as_str() == id
-                        } else {
-                            definition.id.as_str() == id
-                        }
-                    })
-                    .map(|(definition, _)| definition)
+                    .find(|definition| definition.id.as_str() == id)
             })
     }
 }
@@ -1084,11 +1084,7 @@ let x: Number = 42
             find_references_test(
                 script,
                 &[
-                    (
-                        position(0, 4),
-                        Some(&[range(1, 4, 1)]),
-                        false,
-                    ),
+                    (position(0, 4), Some(&[range(1, 4, 1)]), false),
                     (
                         position(0, 4),
                         Some(&[range(0, 4, 1), range(1, 4, 1)]),
