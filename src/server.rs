@@ -204,7 +204,12 @@ impl LanguageServer for KotoServer {
             .and_then(|info| info.get_definition_location(position));
 
         if let Some(location) = location {
-            Ok(Some(PrepareRenameResponse::Range(location.range)))
+            if location.uri.as_ref() == &uri {
+                Ok(Some(PrepareRenameResponse::Range(location.range)))
+            } else {
+                // The definition is in another file, don't allow a rename
+                Ok(None)
+            }
         } else {
             Err(Error::invalid_params("No reference found at position"))
         }
