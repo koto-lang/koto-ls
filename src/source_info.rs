@@ -404,8 +404,10 @@ impl<'i> SourceInfoBuilder<'i> {
             }
             Node::Try(info) => {
                 self.visit_node(info.try_block, ctx.default());
-                self.visit_node(info.catch_arg, ctx.with_ids_as_definitions());
-                self.visit_node(info.catch_block, ctx.default());
+                for catch_block in &info.catch_blocks {
+                    self.visit_node(catch_block.arg, ctx.with_ids_as_definitions());
+                    self.visit_node(catch_block.block, ctx.default());
+                }
                 if let Some(finally_block) = info.finally_block {
                     self.visit_node(finally_block, ctx.default());
                 }

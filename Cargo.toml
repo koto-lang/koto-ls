@@ -14,4 +14,3 @@ tracing-subscriber = "0.3.18"
 
 [patch.crates-io]
 koto = { git = "https://github.com/koto-lang/koto" }
-# koto = { path = "../koto/crates/koto" }

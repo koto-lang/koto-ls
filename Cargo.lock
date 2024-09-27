@@ -132,6 +132,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "circular-buffer"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b67261db007b5f4cf8cba393c1a5c511a5cc072339ce16e12aeba1d7b9b77946"
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -376,7 +382,7 @@ dependencies = [
 [[package]]
 name = "koto"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#06583ec6179831681e9241bbdaa886a51061fb1e"
+source = "git+https://github.com/koto-lang/koto#8cc83000a6fbba89357f057e52aab0de188f722d"
 dependencies = [
  "dunce",
  "koto_bytecode",
@@ -401,8 +407,9 @@ dependencies = [
 [[package]]
 name = "koto_bytecode"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#06583ec6179831681e9241bbdaa886a51061fb1e"
+source = "git+https://github.com/koto-lang/koto#8cc83000a6fbba89357f057e52aab0de188f722d"
 dependencies = [
+ "circular-buffer",
  "derive-name",
  "dunce",
  "koto_memory",
@@ -415,7 +422,7 @@ dependencies = [
 [[package]]
 name = "koto_derive"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#06583ec6179831681e9241bbdaa886a51061fb1e"
+source = "git+https://github.com/koto-lang/koto#8cc83000a6fbba89357f057e52aab0de188f722d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -425,7 +432,7 @@ dependencies = [
 [[package]]
 name = "koto_lexer"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#06583ec6179831681e9241bbdaa886a51061fb1e"
+source = "git+https://github.com/koto-lang/koto#8cc83000a6fbba89357f057e52aab0de188f722d"
 dependencies = [
  "unicode-segmentation",
  "unicode-width",
@@ -435,7 +442,7 @@ dependencies = [
 [[package]]
 name = "koto_memory"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#06583ec6179831681e9241bbdaa886a51061fb1e"
+source = "git+https://github.com/koto-lang/koto#8cc83000a6fbba89357f057e52aab0de188f722d"
 dependencies = [
  "parking_lot",
 ]
@@ -443,7 +450,7 @@ dependencies = [
 [[package]]
 name = "koto_parser"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#06583ec6179831681e9241bbdaa886a51061fb1e"
+source = "git+https://github.com/koto-lang/koto#8cc83000a6fbba89357f057e52aab0de188f722d"
 dependencies = [
  "derive-name",
  "koto_lexer",
@@ -456,7 +463,7 @@ dependencies = [
 [[package]]
 name = "koto_runtime"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#06583ec6179831681e9241bbdaa886a51061fb1e"
+source = "git+https://github.com/koto-lang/koto#8cc83000a6fbba89357f057e52aab0de188f722d"
 dependencies = [
  "chrono",
  "downcast-rs",
@@ -468,6 +475,7 @@ dependencies = [
  "koto_memory",
  "koto_parser",
  "rustc-hash",
+ "saturating_cast",
  "smallvec",
  "thiserror",
  "unicode-segmentation",
@@ -695,6 +703,12 @@ name = "ryu"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
+
+[[package]]
+name = "saturating_cast"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fc4972f129a0ea378b69fa7c186d63255606e362ad00795f00b869dea5265eb"
 
 [[package]]
 name = "scopeguard"
