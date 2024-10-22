@@ -2,6 +2,7 @@ use crate::info_cache::InfoCache;
 use crate::source_info::SourceInfo;
 use crate::utils::{default, koto_span_to_lsp_range};
 use koto::parser::Span;
+use koto::runtime::DisplayContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -59,6 +60,7 @@ impl KotoServer {
         let diagnostics = vec![Diagnostic {
             range: koto_span_to_lsp_range(span),
             message,
+            severity: Some(DiagnosticSeverity::ERROR),
             ..default()
         }];
 
