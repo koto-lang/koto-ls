@@ -714,6 +714,7 @@ impl<'i> SourceInfoBuilder<'i> {
                 self.visit_node(*node, ctx.default());
             }
             ChainNode::Call { args, .. } => self.visit_nested(args, ctx.default()),
+            ChainNode::NullCheck => {}
         }
         if let Some(next) = next {
             self.visit_node(*next, ctx.default());
