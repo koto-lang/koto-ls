@@ -382,7 +382,7 @@ dependencies = [
 [[package]]
 name = "koto"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#29159291c2fd02fb4276b5dde15ae08ed70b3657"
+source = "git+https://github.com/koto-lang/koto#ced517ac8428c797368d0b43523249fc73d077a6"
 dependencies = [
  "dunce",
  "koto_bytecode",
@@ -407,7 +407,7 @@ dependencies = [
 [[package]]
 name = "koto_bytecode"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#29159291c2fd02fb4276b5dde15ae08ed70b3657"
+source = "git+https://github.com/koto-lang/koto#ced517ac8428c797368d0b43523249fc73d077a6"
 dependencies = [
  "circular-buffer",
  "derive-name",
@@ -422,7 +422,7 @@ dependencies = [
 [[package]]
 name = "koto_derive"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#29159291c2fd02fb4276b5dde15ae08ed70b3657"
+source = "git+https://github.com/koto-lang/koto#ced517ac8428c797368d0b43523249fc73d077a6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -432,7 +432,7 @@ dependencies = [
 [[package]]
 name = "koto_lexer"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#29159291c2fd02fb4276b5dde15ae08ed70b3657"
+source = "git+https://github.com/koto-lang/koto#ced517ac8428c797368d0b43523249fc73d077a6"
 dependencies = [
  "unicode-segmentation",
  "unicode-width",
@@ -442,7 +442,7 @@ dependencies = [
 [[package]]
 name = "koto_memory"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#29159291c2fd02fb4276b5dde15ae08ed70b3657"
+source = "git+https://github.com/koto-lang/koto#ced517ac8428c797368d0b43523249fc73d077a6"
 dependencies = [
  "parking_lot",
 ]
@@ -450,7 +450,7 @@ dependencies = [
 [[package]]
 name = "koto_parser"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#29159291c2fd02fb4276b5dde15ae08ed70b3657"
+source = "git+https://github.com/koto-lang/koto#ced517ac8428c797368d0b43523249fc73d077a6"
 dependencies = [
  "derive-name",
  "koto_lexer",
@@ -463,7 +463,7 @@ dependencies = [
 [[package]]
 name = "koto_runtime"
 version = "0.15.0"
-source = "git+https://github.com/koto-lang/koto#29159291c2fd02fb4276b5dde15ae08ed70b3657"
+source = "git+https://github.com/koto-lang/koto#ced517ac8428c797368d0b43523249fc73d077a6"
 dependencies = [
  "chrono",
  "downcast-rs",
@@ -1046,9 +1046,9 @@ checksum = "d4c87d22b6e3f4a18d4d40ef354e97c90fcb14dd91d7dc0aa9d8a1172ebf7202"
 
 [[package]]
 name = "unicode-width"
-version = "0.1.12"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68f5e5f3158ecfd4b8ff6fe086db7c8467a2dfdac97fe420f2b7c4aa97af66d6"
+checksum = "1fc81956842c57dac11422a97c3b8195a1ff727f06e85c84ed2e8aa277c9a0fd"
 
 [[package]]
 name = "unicode-xid"
