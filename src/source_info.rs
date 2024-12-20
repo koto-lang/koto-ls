@@ -466,7 +466,7 @@ impl<'i> SourceInfoBuilder<'i> {
                         None => format!("{key_id}"),
                     };
                     child_definitions.push(Definition::new(
-                        field_id.as_str().into(), // TODO - use new from impl for String
+                        field_id.into(),
                         Location::new(self.uri.clone(), *ctx.ast.span(key_node.span)),
                         SymbolKind::FIELD,
                         self.frames.len() == 1, // TODO - use frame.is_top_level?
