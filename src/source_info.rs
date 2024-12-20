@@ -146,7 +146,7 @@ fn cmp_position_to_range(position: Position, range: &Range) -> Ordering {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Definition {
     location: Location,
-    id: StringSlice,
+    id: StringSlice<usize>,
     kind: SymbolKind,
     // true for definitions at the top-level of the script, i.e. not in a function
     top_level: bool,
@@ -155,7 +155,7 @@ pub struct Definition {
 
 impl Definition {
     fn new(
-        id: StringSlice,
+        id: StringSlice<usize>,
         location: Location,
         kind: SymbolKind,
         top_level: bool,
@@ -200,7 +200,7 @@ impl From<&Definition> for DocumentSymbol {
 pub struct Reference {
     pub location: Location,
     pub definition: Location,
-    pub id: StringSlice,
+    pub id: StringSlice<usize>,
 }
 
 struct SourceInfoBuilder<'i> {
@@ -466,7 +466,7 @@ impl<'i> SourceInfoBuilder<'i> {
                         None => format!("{key_id}"),
                     };
                     child_definitions.push(Definition::new(
-                        StringSlice::from(field_id),
+                        field_id.as_str().into(), // TODO - use new from impl for String
                         Location::new(self.uri.clone(), *ctx.ast.span(key_node.span)),
                         SymbolKind::FIELD,
                         self.frames.len() == 1, // TODO - use frame.is_top_level?
@@ -682,7 +682,7 @@ impl<'i> SourceInfoBuilder<'i> {
                     None => format!("{key_id}"),
                 };
                 self.add_definition(
-                    StringSlice::from(target_id),
+                    target_id.as_str().into(),
                     SymbolKind::FIELD,
                     child_definitions,
                     target_node,
@@ -742,7 +742,7 @@ impl<'i> SourceInfoBuilder<'i> {
 
     fn add_definition(
         &mut self,
-        id: StringSlice,
+        id: StringSlice<usize>,
         kind: SymbolKind,
         children: Vec<Definition>,
         node: &AstNode,
@@ -774,7 +774,12 @@ impl<'i> SourceInfoBuilder<'i> {
         self.add_reference_with_definition(id, *span, location);
     }
 
-    fn add_reference_with_definition(&mut self, id: StringSlice, span: Span, definition: Location) {
+    fn add_reference_with_definition(
+        &mut self,
+        id: StringSlice<usize>,
+        span: Span,
+        definition: Location,
+    ) {
         self.references.push(Reference {
             location: Location::new(self.uri.clone(), span),
             definition,
@@ -783,7 +788,8 @@ impl<'i> SourceInfoBuilder<'i> {
     }
 
     fn find_module(&self, name: &str) -> Option<Arc<Url>> {
-        let Ok(path) = koto::bytecode::find_module(name, None) else {
+        let Ok(path) = koto::bytecode::find_module(name, None::<&str>) else {
+            // TODO drop turbofish
             return None;
         };
         let Ok(url) = Url::from_file_path(path) else {
@@ -816,7 +822,7 @@ struct Frame {
 impl Frame {
     fn add_definition(
         &mut self,
-        id: StringSlice,
+        id: StringSlice<usize>,
         location: Location,
         kind: SymbolKind,
         children: Vec<Definition>,
@@ -880,7 +886,7 @@ impl<'a> Context<'a> {
         self.ast.node(index)
     }
 
-    fn string(&self, constant_index: ConstantIndex) -> StringSlice {
+    fn string(&self, constant_index: ConstantIndex) -> StringSlice<usize> {
         self.ast.constants().get_string_slice(constant_index)
     }
 
