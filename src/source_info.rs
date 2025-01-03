@@ -272,7 +272,7 @@ impl<'i> SourceInfoBuilder<'i> {
             | Node::RangeFull
             | Node::Continue
             | Node::Self_
-            | Node::Type(..)
+            | Node::Type { .. }
             | Node::Wildcard(..) => {}
             // Nodes with a single child node that should be visited
             Node::Nested(node)
@@ -788,8 +788,7 @@ impl<'i> SourceInfoBuilder<'i> {
     }
 
     fn find_module(&self, name: &str) -> Option<Arc<Url>> {
-        let Ok(path) = koto::bytecode::find_module(name, None::<&str>) else {
-            // TODO drop turbofish
+        let Ok(path) = koto::bytecode::find_module(name, None) else {
             return None;
         };
         let Ok(url) = Url::from_file_path(path) else {
