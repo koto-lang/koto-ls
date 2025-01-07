@@ -5,8 +5,10 @@ An implementation of the [Language Server Protocol][lsp] for the
 
 ## Installation
 
-The `koto-ls` executable can be installed from the current directory by running
-`cargo install --path .`.
+The latest published version of `koto-ls` can be installed by running
+`cargo install koto-ls`.
+
+To install the development version of `koto-ls`, run `cargo install --path .` in the current directory.
 
 ## Features
 
