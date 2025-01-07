@@ -1,7 +1,15 @@
 [package]
 name = "koto-ls"
-version = "0.1.0"
+version = "0.15.0"
 edition = "2021"
+
+authors = ["irh <ian.r.hobson@gmail.com>"]
+description = "An LSP server for the Koto programming language"
+homepage = "https://koto.dev"
+keywords = ["scripting", "language", "koto", "lsp"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/koto-lang/koto-ls"
 
 [dependencies]
 anyhow = "1.0.82"
@@ -16,5 +24,5 @@ version = "0.15.0"
 default-features = false
 features = ["arc"]
 
-[patch.crates-io]
-koto = { git = "https://github.com/koto-lang/koto" }
+# [patch.crates-io]
+# koto = { git = "https://github.com/koto-lang/koto" }

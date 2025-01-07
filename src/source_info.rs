@@ -43,7 +43,7 @@ pub struct SourceInfo {
 impl SourceInfo {
     pub fn new(script: &str, uri: Arc<Url>, info_cache: &mut InfoCache) -> Result<Self> {
         let ast = Parser::parse(script)?;
-        Compiler::compile(&ast, default())?;
+        Compiler::compile(script, None, default())?;
         Ok(SourceInfoBuilder::from_ast(&ast, uri, info_cache).build())
     }
 
@@ -682,7 +682,7 @@ impl<'i> SourceInfoBuilder<'i> {
                     None => format!("{key_id}"),
                 };
                 self.add_definition(
-                    target_id.as_str().into(),
+                    target_id.into(),
                     SymbolKind::FIELD,
                     child_definitions,
                     target_node,

@@ -39,8 +39,9 @@ vim.api.nvim_create_autocmd("FileType", {
 
 ### Helix
 
-`koto-ls` can be registered as a language server in your
-[`languages.toml` file][helix].
+Helix has built-in support for Koto since version `25.01`, and will make use of `koto-ls` if it's available in your path.
+
+For older versions, `koto-ls` can be registered as a language server in your [`languages.toml` file][helix].
 
 ```toml
 [language-server.koto-ls]
@@ -56,7 +57,6 @@ indent = { tab-width = 2, unit = "  " }
 roots = []
 language-servers = [ "koto-ls" ]
 ```
-
 
 [find-references]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_references
 [goto-definition]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition
