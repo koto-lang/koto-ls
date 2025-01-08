@@ -43,7 +43,7 @@ pub struct SourceInfo {
 impl SourceInfo {
     pub fn new(script: &str, uri: Arc<Url>, info_cache: &mut InfoCache) -> Result<Self> {
         let ast = Parser::parse(script)?;
-        Compiler::compile(script, None, default())?;
+        Compiler::compile_ast(ast.clone(), None, default())?;
         Ok(SourceInfoBuilder::from_ast(&ast, uri, info_cache).build())
     }
 
