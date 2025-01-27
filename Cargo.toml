@@ -26,3 +26,7 @@ features = ["arc"]
 
 [patch.crates-io]
 koto = { git = "https://github.com/koto-lang/koto" }
+
+[profile.release]
+codegen-units = 1
+lto = true
