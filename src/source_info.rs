@@ -282,6 +282,7 @@ impl<'i> SourceInfoBuilder<'i> {
             | Node::Loop { body: node }
             | Node::Throw(node)
             | Node::Yield(node)
+            | Node::PackedExpression(node)
             | Node::Debug {
                 expression: node, ..
             } => {
@@ -380,7 +381,7 @@ impl<'i> SourceInfoBuilder<'i> {
                     self.visit_node(arm.expression, ctx.default());
                 }
             }
-            Node::Ellipsis(maybe_id) => {
+            Node::PackedId(maybe_id) => {
                 if let Some(id) = maybe_id {
                     if ctx.id_is_definition {
                         self.add_definition(
