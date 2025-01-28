@@ -18,6 +18,7 @@ the following LSP features are supported by `koto-ls`:
 - Get document symbols
 - Goto definition
 - Find references
+- Document highlights
 - Rename symbol
 
 ## Editor Setup

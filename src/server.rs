@@ -81,6 +81,7 @@ impl LanguageServer for KotoServer {
                 definition_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                document_highlight_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Right(RenameOptions {
                     prepare_provider: Some(true),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
@@ -180,6 +181,39 @@ impl LanguageServer for KotoServer {
         let result = info
             .find_references(position, include_declaration)
             .map(|references| references.map(Location::from).collect());
+
+        if result.is_none() {
+            self.client
+                .log_message(MessageType::INFO, "No references found")
+                .await;
+        }
+
+        Ok(result)
+    }
+
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let Some(info) = self.source_info.lock().await.get(&uri) else {
+            self.client
+                .log_message(MessageType::ERROR, "No references found")
+                .await;
+            return Err(Error::invalid_params("No source information available"));
+        };
+
+        let result = info.find_references(position, true).map(|references| {
+            references
+                .filter(|location| *location.uri == uri)
+                .map(|location| DocumentHighlight {
+                    range: location.range,
+                    kind: None,
+                })
+                .collect()
+        });
 
         if result.is_none() {
             self.client
