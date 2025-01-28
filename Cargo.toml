@@ -14,7 +14,7 @@ repository = "https://github.com/koto-lang/koto-ls"
 [dependencies]
 anyhow = "1.0.82"
 is_sorted = "0.1.1"
-thiserror = "1.0.61"
+thiserror = "2"
 tokio = { version = "1.37.0", features = ["full"] }
 tower-lsp = "0.20.0"
 tracing-subscriber = "0.3.18"
