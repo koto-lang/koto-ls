@@ -526,7 +526,7 @@ dependencies = [
 [[package]]
 name = "koto"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#fa038a9718b6fdc395ff9d2dc3051e82a9be32ff"
+source = "git+https://github.com/koto-lang/koto#a82bf962831a6fe654f4d6e11ec887279dc3eb80"
 dependencies = [
  "koto_bytecode",
  "koto_parser",
@@ -550,7 +550,7 @@ dependencies = [
 [[package]]
 name = "koto_bytecode"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#fa038a9718b6fdc395ff9d2dc3051e82a9be32ff"
+source = "git+https://github.com/koto-lang/koto#a82bf962831a6fe654f4d6e11ec887279dc3eb80"
 dependencies = [
  "circular-buffer",
  "derive-name",
@@ -565,7 +565,7 @@ dependencies = [
 [[package]]
 name = "koto_derive"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#fa038a9718b6fdc395ff9d2dc3051e82a9be32ff"
+source = "git+https://github.com/koto-lang/koto#a82bf962831a6fe654f4d6e11ec887279dc3eb80"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -575,7 +575,7 @@ dependencies = [
 [[package]]
 name = "koto_lexer"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#fa038a9718b6fdc395ff9d2dc3051e82a9be32ff"
+source = "git+https://github.com/koto-lang/koto#a82bf962831a6fe654f4d6e11ec887279dc3eb80"
 dependencies = [
  "unicode-segmentation",
  "unicode-width",
@@ -585,7 +585,7 @@ dependencies = [
 [[package]]
 name = "koto_memory"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#fa038a9718b6fdc395ff9d2dc3051e82a9be32ff"
+source = "git+https://github.com/koto-lang/koto#a82bf962831a6fe654f4d6e11ec887279dc3eb80"
 dependencies = [
  "parking_lot",
 ]
@@ -593,7 +593,7 @@ dependencies = [
 [[package]]
 name = "koto_parser"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#fa038a9718b6fdc395ff9d2dc3051e82a9be32ff"
+source = "git+https://github.com/koto-lang/koto#a82bf962831a6fe654f4d6e11ec887279dc3eb80"
 dependencies = [
  "derive-name",
  "koto_lexer",
@@ -606,7 +606,7 @@ dependencies = [
 [[package]]
 name = "koto_runtime"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#fa038a9718b6fdc395ff9d2dc3051e82a9be32ff"
+source = "git+https://github.com/koto-lang/koto#a82bf962831a6fe654f4d6e11ec887279dc3eb80"
 dependencies = [
  "chrono",
  "downcast-rs",
