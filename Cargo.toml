@@ -1,7 +1,7 @@
 [package]
 name = "koto-ls"
 version = "0.16.0"
-edition = "2021"
+edition = "2024"
 
 authors = ["irh <ian.r.hobson@gmail.com>"]
 description = "An LSP server for the Koto programming language"
