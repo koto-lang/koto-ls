@@ -115,7 +115,7 @@ pub struct FindReferencesIter<'a> {
     include_definition: bool,
 }
 
-impl<'a> Iterator for FindReferencesIter<'a> {
+impl Iterator for FindReferencesIter<'_> {
     type Item = Location;
 
     fn next(&mut self) -> Option<Self::Item> {
