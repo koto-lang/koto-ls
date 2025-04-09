@@ -520,12 +520,12 @@ dependencies = [
 [[package]]
 name = "koto"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#d8c317f3657a73c102f335e802338de67ff2bbf6"
+source = "git+https://github.com/koto-lang/koto#9ebd66adc4caa3ac2c3d46748c56755ef2d1501b"
 dependencies = [
  "koto_bytecode",
  "koto_parser",
  "koto_runtime",
- "thiserror 1.0.69",
+ "thiserror",
 ]
 
 [[package]]
@@ -535,7 +535,7 @@ dependencies = [
  "anyhow",
  "is_sorted",
  "koto",
- "thiserror 2.0.11",
+ "thiserror",
  "tokio",
  "tower-lsp",
  "tracing-subscriber",
@@ -544,7 +544,7 @@ dependencies = [
 [[package]]
 name = "koto_bytecode"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#d8c317f3657a73c102f335e802338de67ff2bbf6"
+source = "git+https://github.com/koto-lang/koto#9ebd66adc4caa3ac2c3d46748c56755ef2d1501b"
 dependencies = [
  "circular-buffer",
  "derive-name",
@@ -553,13 +553,13 @@ dependencies = [
  "koto_parser",
  "rustc-hash",
  "smallvec",
- "thiserror 1.0.69",
+ "thiserror",
 ]
 
 [[package]]
 name = "koto_derive"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#d8c317f3657a73c102f335e802338de67ff2bbf6"
+source = "git+https://github.com/koto-lang/koto#9ebd66adc4caa3ac2c3d46748c56755ef2d1501b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -569,7 +569,7 @@ dependencies = [
 [[package]]
 name = "koto_lexer"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#d8c317f3657a73c102f335e802338de67ff2bbf6"
+source = "git+https://github.com/koto-lang/koto#9ebd66adc4caa3ac2c3d46748c56755ef2d1501b"
 dependencies = [
  "unicode-segmentation",
  "unicode-width",
@@ -579,7 +579,7 @@ dependencies = [
 [[package]]
 name = "koto_memory"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#d8c317f3657a73c102f335e802338de67ff2bbf6"
+source = "git+https://github.com/koto-lang/koto#9ebd66adc4caa3ac2c3d46748c56755ef2d1501b"
 dependencies = [
  "parking_lot",
 ]
@@ -587,20 +587,20 @@ dependencies = [
 [[package]]
 name = "koto_parser"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#d8c317f3657a73c102f335e802338de67ff2bbf6"
+source = "git+https://github.com/koto-lang/koto#9ebd66adc4caa3ac2c3d46748c56755ef2d1501b"
 dependencies = [
  "derive-name",
  "koto_lexer",
  "koto_memory",
  "smallvec",
- "thiserror 1.0.69",
+ "thiserror",
  "unicode-segmentation",
 ]
 
 [[package]]
 name = "koto_runtime"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#d8c317f3657a73c102f335e802338de67ff2bbf6"
+source = "git+https://github.com/koto-lang/koto#9ebd66adc4caa3ac2c3d46748c56755ef2d1501b"
 dependencies = [
  "chrono",
  "indexmap",
@@ -614,7 +614,7 @@ dependencies = [
  "rustc-hash",
  "saturating_cast",
  "smallvec",
- "thiserror 1.0.69",
+ "thiserror",
  "unicode-segmentation",
 ]
 
@@ -833,9 +833,9 @@ checksum = "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f"
 
 [[package]]
 name = "rustc-hash"
-version = "1.1.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
+checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
 
 [[package]]
 name = "rustversion"
@@ -983,31 +983,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.69"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
-dependencies = [
- "thiserror-impl 1.0.69",
-]
-
-[[package]]
-name = "thiserror"
 version = "2.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d452f284b73e6d76dd36758a0c8684b1d5be31f92b89d07fd5822175732206fc"
 dependencies = [
- "thiserror-impl 2.0.11",
-]
-
-[[package]]
-name = "thiserror-impl"
-version = "1.0.69"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
+ "thiserror-impl",
 ]
 
 [[package]]
