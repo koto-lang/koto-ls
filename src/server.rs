@@ -1,7 +1,6 @@
 use crate::info_cache::InfoCache;
 use crate::source_info::SourceInfo;
 use crate::utils::{default, koto_span_to_lsp_range};
-use koto::parser::Span;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -35,36 +34,30 @@ impl KotoServer {
 
         let uri_arc = Arc::new(uri.clone());
         let mut info_cache = self.source_info.lock().await;
-        match SourceInfo::new(script, uri_arc.clone(), &mut info_cache) {
-            Ok(info) => {
-                info_cache.insert(uri_arc, version.into(), info);
-                self.client
-                    .publish_diagnostics(uri.clone(), vec![], Some(version))
-                    .await;
-            }
-            Err(e) => {
-                if let Some(span) = e.span() {
-                    self.report_koto_error(span, e.to_string(), uri, version)
-                        .await;
-                } else {
-                    self.client
-                        .log_message(MessageType::ERROR, e.to_string())
-                        .await;
-                }
-            }
-        }
-    }
+        let info = SourceInfo::new(script, uri_arc.clone(), &mut info_cache);
 
-    async fn report_koto_error(&self, span: Span, message: String, uri: Url, version: i32) {
-        let diagnostics = vec![Diagnostic {
-            range: koto_span_to_lsp_range(span),
-            message,
-            severity: Some(DiagnosticSeverity::ERROR),
-            ..default()
-        }];
+        let diagnostics = if let Some(error) = &info.error {
+            if let Some(span) = error.span() {
+                vec![Diagnostic {
+                    range: koto_span_to_lsp_range(span),
+                    message: error.to_string(),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    ..default()
+                }]
+            } else {
+                self.client
+                    .log_message(MessageType::ERROR, error.to_string())
+                    .await;
+                return;
+            }
+        } else {
+            vec![]
+        };
+
+        info_cache.insert(uri_arc, version.into(), info);
 
         self.client
-            .publish_diagnostics(uri, diagnostics, Some(version))
+            .publish_diagnostics(uri.clone(), diagnostics, Some(version))
             .await;
     }
 }

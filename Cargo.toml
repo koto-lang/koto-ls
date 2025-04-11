@@ -19,13 +19,19 @@ tokio = { version = "1.37.0", features = ["full"] }
 tower-lsp = "0.20.0"
 tracing-subscriber = "0.3.18"
 
-[dependencies.koto]
+[dependencies.koto_bytecode]
 version = "0.16.0"
 default-features = false
 features = ["arc"]
 
+[dependencies.koto_parser]
+version = "0.16.0"
+default-features = false
+features = ["arc", "error_ast"]
+
 [patch.crates-io]
-koto = { git = "https://github.com/koto-lang/koto" }
+koto_bytecode = { git = "https://github.com/koto-lang/koto" }
+koto_parser = { git = "https://github.com/koto-lang/koto" }
 
 [profile.release]
 codegen-units = 1

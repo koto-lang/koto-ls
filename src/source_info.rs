@@ -1,9 +1,7 @@
-use koto::{
-    bytecode::Compiler,
-    parser::{
-        Ast, AstIndex, AstNode, AstString, ChainNode, ConstantIndex, ImportItem, Node, Parser,
-        Span, StringContents, StringNode, StringSlice,
-    },
+use koto_bytecode::Compiler;
+use koto_parser::{
+    Ast, AstIndex, AstNode, AstString, ChainNode, ConstantIndex, ImportItem, Node, Parser, Span,
+    StringContents, StringNode, StringSlice,
 };
 use std::{cmp::Ordering, fs, sync::Arc};
 use thiserror::Error;
@@ -17,11 +15,10 @@ use crate::{
 #[derive(Error, Clone, Debug)]
 pub enum Error {
     #[error(transparent)]
-    Parser(#[from] koto::parser::Error),
+    Parser(#[from] koto_parser::Error),
     #[error(transparent)]
-    Compiler(#[from] koto::bytecode::CompilerError),
+    Compiler(#[from] koto_bytecode::CompilerError),
 }
-pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
     pub fn span(&self) -> Option<Span> {
@@ -32,19 +29,39 @@ impl Error {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct SourceInfo {
     // A vec of all definitions, sorted by start position
     definitions: Vec<Definition>,
     // A vec of all references, sorted by start position
     references: Vec<Reference>,
+    // An error that was encountered while compiling the script
+    pub error: Option<Error>,
 }
 
 impl SourceInfo {
-    pub fn new(script: &str, uri: Arc<Url>, info_cache: &mut InfoCache) -> Result<Self> {
-        let ast = Parser::parse(script)?;
-        Compiler::compile_ast(ast.clone(), None, default())?;
-        Ok(SourceInfoBuilder::from_ast(&ast, uri, info_cache).build())
+    pub fn new(script: &str, uri: Arc<Url>, info_cache: &mut InfoCache) -> Self {
+        let mut error = None;
+        let ast = match Parser::parse(script) {
+            Ok(ast) => ast,
+            Err(mut parse_error) => {
+                if let Some(ast) = parse_error.ast.take() {
+                    error = Some(parse_error.into());
+                    *ast
+                } else {
+                    return Self {
+                        error: Some(parse_error.into()),
+                        ..Default::default()
+                    };
+                }
+            }
+        };
+        if error.is_none() {
+            if let Err(compile_error) = Compiler::compile_ast(ast.clone(), None, default()) {
+                error = Some(compile_error.into())
+            }
+        }
+        SourceInfoBuilder::from_ast(&ast, uri, info_cache).build(error)
     }
 
     pub fn get_definition_location(&self, position: Position) -> Option<Location> {
@@ -239,7 +256,7 @@ impl<'i> SourceInfoBuilder<'i> {
         result
     }
 
-    fn build(mut self) -> SourceInfo {
+    fn build(mut self, error: Option<Error>) -> SourceInfo {
         // Sort the definitions, they get added in pop_frame so they aren't in order
         self.definitions
             .sort_by_key(|definition| definition.location.range.start);
@@ -253,6 +270,7 @@ impl<'i> SourceInfoBuilder<'i> {
         SourceInfo {
             definitions: self.definitions,
             references: self.references,
+            error,
         }
     }
 
@@ -650,9 +668,7 @@ impl<'i> SourceInfoBuilder<'i> {
         let Ok(script) = fs::read_to_string(&path) else {
             return;
         };
-        let Ok(info) = SourceInfo::new(&script, url.clone(), self.info_cache) else {
-            return;
-        };
+        let info = SourceInfo::new(&script, url.clone(), self.info_cache);
         self.info_cache.insert(url, modified_time.into(), info);
     }
 
@@ -789,7 +805,7 @@ impl<'i> SourceInfoBuilder<'i> {
     }
 
     fn find_module(&self, name: &str) -> Option<Arc<Url>> {
-        let Ok(path) = koto::bytecode::find_module(name, None) else {
+        let Ok(path) = koto_bytecode::find_module(name, None) else {
             return None;
         };
         let Ok(url) = Url::from_file_path(path) else {
@@ -936,7 +952,7 @@ mod test {
 
         fn goto_definition_test(script: &str, cases: &[(Position, Option<Range>)]) -> Result<()> {
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script, test_uri(), &mut info_cache)?;
+            let info = SourceInfo::new(script, test_uri(), &mut info_cache);
 
             for (i, (position, expected)) in cases.iter().enumerate() {
                 let result = info.get_definition_location(*position);
@@ -1012,7 +1028,7 @@ f a
             cases: &[(Position, Option<&[Range]>, bool)],
         ) -> Result<()> {
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script, test_uri(), &mut info_cache)?;
+            let info = SourceInfo::new(script, test_uri(), &mut info_cache);
 
             for (i, (position, expected_references, include_definition)) in cases.iter().enumerate()
             {
@@ -1288,7 +1304,7 @@ x = |y| y.baz = bar
             expected_definitions: &[TestDefinition],
         ) -> Result<()> {
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script, test_uri(), &mut info_cache)?;
+            let info = SourceInfo::new(script, test_uri(), &mut info_cache);
             let definitions = info.top_level_definitions().collect::<Vec<_>>();
 
             for (i, (expected, actual)) in expected_definitions
@@ -1369,6 +1385,27 @@ x, y, z = f()
                     definition(range(7, 0, 1), "x", SymbolKind::VARIABLE, &[]),
                     definition(range(7, 3, 1), "y", SymbolKind::VARIABLE, &[]),
                     definition(range(7, 6, 1), "z", SymbolKind::VARIABLE, &[]),
+                ],
+            )
+        }
+
+        #[test]
+        fn assignments_before_error() -> Result<()> {
+            let script = "\
+a = 42
+foo = |n|
+  x = n
+  x * x
+
+!
+
+x, y, z = f()
+";
+            top_level_definitions_test(
+                script,
+                &[
+                    definition(range(0, 0, 1), "a", SymbolKind::NUMBER, &[]),
+                    definition(range(1, 0, 3), "foo", SymbolKind::FUNCTION, &[]),
                 ],
             )
         }
