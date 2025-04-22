@@ -12,6 +12,7 @@ use crate::{
     utils::{default, koto_span_to_lsp_range},
 };
 
+/// Errors that could occur while analyzing a source file
 #[derive(Error, Clone, Debug)]
 pub enum Error {
     #[error(transparent)]
@@ -29,17 +30,19 @@ impl Error {
     }
 }
 
+/// Analyzed information about the contents of a source file
 #[derive(Clone, Debug, Default)]
 pub struct SourceInfo {
     // A vec of all definitions, sorted by start position
     definitions: Vec<Definition>,
     // A vec of all references, sorted by start position
     references: Vec<Reference>,
-    // An error that was encountered while compiling the script
+    /// If an error was encountered while compiling the script it's cached here
     pub error: Option<Error>,
 }
 
 impl SourceInfo {
+    /// Returns a [SourceInfo] containing the result of analyzing the given script
     pub fn new(script: &str, uri: Arc<Url>, info_cache: &mut InfoCache) -> Self {
         let mut error = None;
         let ast = match Parser::parse(script) {
@@ -101,6 +104,7 @@ impl SourceInfo {
     }
 }
 
+/// A location in a source file, identified by [Url] and [Range]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Location {
     pub uri: Arc<Url>,
@@ -1429,7 +1433,7 @@ export
         #[test]
         fn map_entries() -> Result<()> {
             let script = "\
-x = 
+x =
   a: 123
   b: 99
 ";

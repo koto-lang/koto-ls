@@ -2,6 +2,10 @@ use crate::source_info::SourceInfo;
 use std::{collections::HashMap, sync::Arc, time::SystemTime};
 use tower_lsp::lsp_types::Url;
 
+/// A cache of analyzed sources
+///
+/// When a script is analyzed via [SourceInfo::new] it will recursively analyze any imported modules,
+/// which are then added to the cache to prevent unnecessary reanalysis.
 #[derive(Default, Debug)]
 pub struct InfoCache {
     entries: HashMap<Arc<Url>, Info>,
@@ -32,7 +36,9 @@ impl InfoCache {
 
 #[derive(Debug)]
 pub struct Info {
+    /// The cached [SourceInfo]
     pub info: Arc<SourceInfo>,
+    /// The version of the source that was analyzed
     pub version: Version,
 }
 
