@@ -417,7 +417,7 @@ dependencies = [
 [[package]]
 name = "koto_bytecode"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#cc84da5b2fb7de5d2647d13c7f26afe8ecfa16e5"
+source = "git+https://github.com/koto-lang/koto#8b94c43fc425805bfba884097c5a4c651ef97457"
 dependencies = [
  "circular-buffer",
  "derive-name",
@@ -432,7 +432,7 @@ dependencies = [
 [[package]]
 name = "koto_lexer"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#cc84da5b2fb7de5d2647d13c7f26afe8ecfa16e5"
+source = "git+https://github.com/koto-lang/koto#8b94c43fc425805bfba884097c5a4c651ef97457"
 dependencies = [
  "unicode-segmentation",
  "unicode-width",
@@ -442,7 +442,7 @@ dependencies = [
 [[package]]
 name = "koto_memory"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#cc84da5b2fb7de5d2647d13c7f26afe8ecfa16e5"
+source = "git+https://github.com/koto-lang/koto#8b94c43fc425805bfba884097c5a4c651ef97457"
 dependencies = [
  "parking_lot",
 ]
@@ -450,7 +450,7 @@ dependencies = [
 [[package]]
 name = "koto_parser"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto#cc84da5b2fb7de5d2647d13c7f26afe8ecfa16e5"
+source = "git+https://github.com/koto-lang/koto#8b94c43fc425805bfba884097c5a4c651ef97457"
 dependencies = [
  "derive-name",
  "koto_lexer",
