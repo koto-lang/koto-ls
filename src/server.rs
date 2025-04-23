@@ -117,22 +117,6 @@ impl LanguageServer for KotoServer {
         }
     }
 
-    async fn document_symbol(
-        &self,
-        params: DocumentSymbolParams,
-    ) -> Result<Option<DocumentSymbolResponse>> {
-        let uri = params.text_document.uri;
-        let result = self.source_info.lock().await.get(&uri).map(|info| {
-            let definitions = info
-                .top_level_definitions()
-                .map(DocumentSymbol::from)
-                .collect();
-            DocumentSymbolResponse::Nested(definitions)
-        });
-
-        Ok(result)
-    }
-
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
@@ -155,6 +139,22 @@ impl LanguageServer for KotoServer {
                 .log_message(MessageType::INFO, "No definition found")
                 .await;
         }
+
+        Ok(result)
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri;
+        let result = self.source_info.lock().await.get(&uri).map(|info| {
+            let definitions = info
+                .top_level_definitions()
+                .map(DocumentSymbol::from)
+                .collect();
+            DocumentSymbolResponse::Nested(definitions)
+        });
 
         Ok(result)
     }
