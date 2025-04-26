@@ -809,13 +809,19 @@ impl<'i> SourceInfoBuilder<'i> {
     }
 
     fn find_module(&self, name: &str) -> Option<Arc<Url>> {
-        let Ok(path) = koto_bytecode::find_module(name, None) else {
-            return None;
-        };
-        let Ok(url) = Url::from_file_path(path) else {
-            return None;
-        };
-        Some(Arc::new(url))
+        if let Ok(script_path_buf) = self.uri.to_file_path() {
+            // find modules at directory of current script
+            let script_path = Some(script_path_buf.parent().unwrap());
+            let Ok(path) = koto_bytecode::find_module(name, script_path) else {
+                return None;
+            };
+            let Ok(url) = Url::from_file_path(path) else {
+                return None;
+            };
+            Some(Arc::new(url))
+        } else {
+            None
+        }
     }
 
     fn push_frame(&mut self, locals_capacity: usize) {
