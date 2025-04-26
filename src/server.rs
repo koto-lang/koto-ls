@@ -129,10 +129,7 @@ impl LanguageServer for KotoServer {
             .await
             .get(&uri)
             .and_then(|info| info.get_definition_location(position))
-            .map(|definition| {
-                println!("Definition found: {definition:?}");
-                GotoDefinitionResponse::Scalar(definition.into())
-            });
+            .map(|definition| GotoDefinitionResponse::Scalar(definition.into()));
 
         if result.is_none() {
             self.client
