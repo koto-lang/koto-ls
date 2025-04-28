@@ -71,6 +71,7 @@ impl LanguageServer for KotoServer {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
@@ -115,6 +116,39 @@ impl LanguageServer for KotoServer {
                 .log_message(MessageType::INFO, "No changes?")
                 .await;
         }
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let result = self
+            .source_info
+            .lock()
+            .await
+            .get(&uri)
+            .and_then(|info| info.get_definition(position))
+            .map(|(definition, is_ref)| {
+                let symbol = DocumentSymbol::from(&definition);
+                let text = format!(
+                    "**{}**  \n{:?} {}",
+                    symbol.name,
+                    symbol.kind,
+                    if is_ref { "reference" } else { "defintion" }
+                );
+                Hover {
+                    contents: HoverContents::Scalar(MarkedString::String(text)),
+                    range: None,
+                }
+            });
+
+        if result.is_none() {
+            self.client
+                .log_message(MessageType::INFO, "No definition found")
+                .await;
+        }
+
+        Ok(result)
     }
 
     async fn goto_definition(
