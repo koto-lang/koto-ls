@@ -811,7 +811,7 @@ impl<'i> SourceInfoBuilder<'i> {
     fn find_module(&self, name: &str) -> Option<Arc<Url>> {
         if let Ok(script_path_buf) = self.uri.to_file_path() {
             // find modules at directory of current script
-            let script_path = Some(script_path_buf.parent().unwrap());
+            let script_path = script_path_buf.parent();
             let Ok(path) = koto_bytecode::find_module(name, script_path) else {
                 return None;
             };
