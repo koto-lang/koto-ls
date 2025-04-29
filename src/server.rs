@@ -122,25 +122,89 @@ impl LanguageServer for KotoServer {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let result = self
-            .source_info
-            .lock()
-            .await
-            .get(&uri)
-            .and_then(|info| info.get_definition(position))
-            .map(|(definition, is_ref)| {
-                let symbol = DocumentSymbol::from(&definition);
-                let text = format!(
-                    "**{}**  \n{:?} {}",
-                    symbol.name,
-                    symbol.kind,
-                    if is_ref { "reference" } else { "defintion" }
-                );
-                Hover {
-                    contents: HoverContents::Scalar(MarkedString::String(text)),
-                    range: None,
-                }
-            });
+        let lock_await = self.source_info.lock().await;
+        let result = lock_await.get(&uri).and_then(|info| {
+            info.get_referenced_definition_location(position)
+                .and_then(|location| {
+                    if location.uri.as_str() == uri.as_str() {
+                        info.get_definition_from_location(location)
+                            .map(|definition| {
+                                let symbol = DocumentSymbol::from(&definition);
+                                let text =
+                                    format!("**{}**  \n{:?} reference", symbol.name, symbol.kind,);
+                                Hover {
+                                    contents: HoverContents::Scalar(MarkedString::String(text)),
+                                    range: None,
+                                }
+                            })
+                    } else {
+                        lock_await
+                            .get(&location.uri) // DOES NOT WORK !!!
+                            .and_then(|info| {
+                                info.get_referenced_definition_location(position).and_then(
+                                    |location| {
+                                        info.get_definition_from_location(location).map(
+                                            |definition| {
+                                                let symbol = DocumentSymbol::from(&definition);
+                                                let text = format!(
+                                                    "**{}**  \n{:?} reference (from module)",
+                                                    symbol.name, symbol.kind,
+                                                );
+                                                Hover {
+                                                    contents: HoverContents::Scalar(
+                                                        MarkedString::String(text),
+                                                    ),
+                                                    range: None,
+                                                }
+                                            },
+                                        )
+                                    },
+                                )
+                            })
+                            // BEGIN DELETE ME
+                            .or_else(|| {
+                                let text = format!("source info not found {:?}", location.uri);
+                                Some(Hover {
+                                    contents: HoverContents::Scalar(MarkedString::String(text)),
+                                    range: None,
+                                })
+                            })
+                        // END DELETE ME
+                    }
+                })
+                .or_else(|| {
+                    info.get_definition_from_position(position)
+                        .map(|definition| {
+                            let symbol = DocumentSymbol::from(&definition);
+                            let text =
+                                format!("**{}**  \n{:?} definition", symbol.name, symbol.kind,);
+                            Hover {
+                                contents: HoverContents::Scalar(MarkedString::String(text)),
+                                range: None,
+                            }
+                        })
+                })
+        });
+
+        // let result = self
+        //     .source_info
+        //     .lock()
+        //     .await
+        //     .get(&uri)
+        //     .and_then(|info| info.get_definition(position))
+        //     .map(|(definition, is_ref)| {
+        //         let symbol = DocumentSymbol::from(&definition);
+        //         let text = format!(
+        //             "**{}**  \n{:?} {}",
+        //             symbol.name,
+        //             symbol.kind,
+        //             if is_ref { "reference" } else { "defintion" }
+        //         );
+        //         Hover {
+        //             contents: HoverContents::Scalar(MarkedString::String(text)),
+        //             range: None,
+        //         }
+        //     });
 
         if result.is_none() {
             self.client
