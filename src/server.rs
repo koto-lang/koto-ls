@@ -126,7 +126,7 @@ impl LanguageServer for KotoServer {
         let result = lock_await.get(&uri).and_then(|info| {
             info.get_referenced_definition_location(position)
                 .and_then(|location| {
-                    if location.uri.as_str() == uri.as_str() {
+                    if location.uri.as_ref() == &uri {
                         info.get_definition_from_location(location)
                             .map(|definition| {
                                 let symbol = DocumentSymbol::from(&definition);
@@ -185,26 +185,6 @@ impl LanguageServer for KotoServer {
                         })
                 })
         });
-
-        // let result = self
-        //     .source_info
-        //     .lock()
-        //     .await
-        //     .get(&uri)
-        //     .and_then(|info| info.get_definition(position))
-        //     .map(|(definition, is_ref)| {
-        //         let symbol = DocumentSymbol::from(&definition);
-        //         let text = format!(
-        //             "**{}**  \n{:?} {}",
-        //             symbol.name,
-        //             symbol.kind,
-        //             if is_ref { "reference" } else { "defintion" }
-        //         );
-        //         Hover {
-        //             contents: HoverContents::Scalar(MarkedString::String(text)),
-        //             range: None,
-        //         }
-        //     });
 
         if result.is_none() {
             self.client
