@@ -134,14 +134,19 @@ impl LanguageServer for KotoServer {
                             })
                     } else {
                         lock_await.get(&location.uri).and_then(|info| {
-                            info.get_definition_from_location(location)
-                                .map(|definition| {
-                                    let symbol = DocumentSymbol::from(&definition);
-                                    format!(
-                                        "**{}**  \n{:?} reference (from module)",
-                                        symbol.name, symbol.kind,
-                                    )
-                                })
+                            // TODO: needs module name list at source info to retrieve modulename
+                            if location.range.end.character == 0 && location.range.end.line == 0 {
+                                Some(format!("**{}**  \n{:?}", "modulename", "Module",))
+                            } else {
+                                info.get_definition_from_location(location)
+                                    .map(|definition| {
+                                        let symbol = DocumentSymbol::from(&definition);
+                                        format!(
+                                            "**{}**  \n{:?} reference (from module)",
+                                            symbol.name, symbol.kind,
+                                        )
+                                    })
+                            }
                         })
                     }
                 })
