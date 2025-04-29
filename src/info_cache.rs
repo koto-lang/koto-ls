@@ -1,6 +1,6 @@
 use crate::source_info::SourceInfo;
 use std::{collections::HashMap, sync::Arc, time::SystemTime};
-use tower_lsp::lsp_types::Url;
+use tower_lsp_server::lsp_types::Uri;
 
 /// A cache of analyzed sources
 ///
@@ -8,11 +8,11 @@ use tower_lsp::lsp_types::Url;
 /// which are then added to the cache to prevent unnecessary reanalysis.
 #[derive(Default, Debug)]
 pub struct InfoCache {
-    entries: HashMap<Arc<Url>, Info>,
+    entries: HashMap<Arc<Uri>, Info>,
 }
 
 impl InfoCache {
-    pub fn insert(&mut self, url: Arc<Url>, version: Version, info: SourceInfo) {
+    pub fn insert(&mut self, url: Arc<Uri>, version: Version, info: SourceInfo) {
         self.entries.insert(
             url,
             Info {
@@ -22,11 +22,11 @@ impl InfoCache {
         );
     }
 
-    pub fn get(&self, url: &Url) -> Option<Arc<SourceInfo>> {
+    pub fn get(&self, url: &Uri) -> Option<Arc<SourceInfo>> {
         self.entries.get(url).map(|info| info.info.clone())
     }
 
-    pub fn get_versioned(&self, url: &Url, version: Version) -> Option<Arc<SourceInfo>> {
+    pub fn get_versioned(&self, url: &Uri, version: Version) -> Option<Arc<SourceInfo>> {
         match self.entries.get(url) {
             Some(info) if info.version == version => Some(info.info.clone()),
             _ => None,
