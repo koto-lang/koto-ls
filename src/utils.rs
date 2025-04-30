@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp_server::lsp_types::{Position, Range};
 
 pub fn koto_span_to_lsp_range(span: koto_parser::Span) -> Range {
     Range {

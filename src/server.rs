@@ -4,9 +4,9 @@ use crate::utils::{default, koto_span_to_lsp_range};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tower_lsp::jsonrpc::{Error, Result};
-use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer};
+use tower_lsp_server::jsonrpc::{Error, Result};
+use tower_lsp_server::lsp_types::*;
+use tower_lsp_server::{Client, LanguageServer};
 
 pub struct KotoServer {
     client: Client,
@@ -21,7 +21,7 @@ impl KotoServer {
         }
     }
 
-    async fn compile(&self, script: &str, uri: Url, version: i32) {
+    async fn compile(&self, script: &str, uri: Uri, version: i32) {
         if self
             .source_info
             .lock()
@@ -62,7 +62,6 @@ impl KotoServer {
     }
 }
 
-#[tower_lsp::async_trait]
 impl LanguageServer for KotoServer {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult {

@@ -5,7 +5,10 @@ use koto_parser::{
 };
 use std::{cmp::Ordering, fs, sync::Arc};
 use thiserror::Error;
-use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, SymbolKind, Url};
+use tower_lsp_server::{
+    UriExt,
+    lsp_types::{DocumentSymbol, Position, Range, SymbolKind, Uri},
+};
 
 use crate::{
     info_cache::InfoCache,
@@ -43,7 +46,7 @@ pub struct SourceInfo {
 
 impl SourceInfo {
     /// Returns a [SourceInfo] containing the result of analyzing the given script
-    pub fn new(script: &str, uri: Arc<Url>, info_cache: &mut InfoCache) -> Self {
+    pub fn new(script: &str, uri: Arc<Uri>, info_cache: &mut InfoCache) -> Self {
         let mut error = None;
         let ast = match Parser::parse(script) {
             Ok(ast) => ast,
@@ -140,12 +143,12 @@ impl SourceInfo {
 /// A location in a source file, identified by [Url] and [Range]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Location {
-    pub uri: Arc<Url>,
+    pub uri: Arc<Uri>,
     pub range: Range,
 }
 
 impl Location {
-    fn new(uri: Arc<Url>, span: Span) -> Self {
+    fn new(uri: Arc<Uri>, span: Span) -> Self {
         Self {
             uri,
             range: koto_span_to_lsp_range(span),
@@ -153,7 +156,7 @@ impl Location {
     }
 }
 
-impl From<Location> for tower_lsp::lsp_types::Location {
+impl From<Location> for tower_lsp_server::lsp_types::Location {
     fn from(value: Location) -> Self {
         Self {
             uri: value.uri.as_ref().clone(),
@@ -269,7 +272,7 @@ pub struct Reference {
 
 struct SourceInfoBuilder<'i> {
     // The uri of the file that is being scanned
-    uri: Arc<Url>,
+    uri: Arc<Uri>,
     // A cache that is used when importing modules
     #[allow(unused)]
     info_cache: &'i mut InfoCache,
@@ -287,7 +290,7 @@ struct SourceInfoBuilder<'i> {
 }
 
 impl<'i> SourceInfoBuilder<'i> {
-    fn from_ast(ast: &Ast, uri: Arc<Url>, info_cache: &'i mut InfoCache) -> Self {
+    fn from_ast(ast: &Ast, uri: Arc<Uri>, info_cache: &'i mut InfoCache) -> Self {
         let mut result = Self {
             uri,
             info_cache,
@@ -697,8 +700,10 @@ impl<'i> SourceInfoBuilder<'i> {
         }
     }
 
-    fn analyze_module(&mut self, url: Arc<Url>) {
-        let Ok(path) = url.to_file_path() else { return };
+    fn analyze_module(&mut self, url: Arc<Uri>) {
+        let Some(path) = url.to_file_path() else {
+            return;
+        };
         let Ok(metadata) = fs::metadata(&path) else {
             return;
         };
@@ -851,14 +856,14 @@ impl<'i> SourceInfoBuilder<'i> {
         });
     }
 
-    fn find_module(&self, name: &str) -> Option<Arc<Url>> {
-        if let Ok(script_path_buf) = self.uri.to_file_path() {
+    fn find_module(&self, name: &str) -> Option<Arc<Uri>> {
+        if let Some(script_path_buf) = self.uri.to_file_path() {
             // find modules at directory of current script
             let script_path = script_path_buf.parent();
             let Ok(path) = koto_bytecode::find_module(name, script_path) else {
                 return None;
             };
-            let Ok(url) = Url::from_file_path(path) else {
+            let Some(url) = Uri::from_file_path(path) else {
                 return None;
             };
             Some(Arc::new(url))
@@ -983,7 +988,8 @@ fn node_symbol_kind(node: &Node) -> SymbolKind {
 mod test {
     use super::*;
     use anyhow::Result;
-    use tower_lsp::lsp_types::Position;
+    use std::str::FromStr;
+    use tower_lsp_server::lsp_types::Position;
 
     fn position(line: u32, character: u32) -> Position {
         Position { line, character }
@@ -996,8 +1002,8 @@ mod test {
         }
     }
 
-    fn test_uri() -> Arc<Url> {
-        Arc::new(Url::parse("file:///test.koto").unwrap())
+    fn test_uri() -> Arc<Uri> {
+        Arc::new(Uri::from_str("file:///test.koto").unwrap())
     }
 
     mod goto_definition {
@@ -1327,7 +1333,7 @@ x = |y| y.baz = bar
     }
 
     mod top_level_definitions {
-        use tower_lsp::lsp_types::SymbolKind;
+        use tower_lsp_server::lsp_types::SymbolKind;
 
         use super::*;
 
