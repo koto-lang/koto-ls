@@ -72,7 +72,7 @@ impl SourceInfo {
 
     pub fn get_definition_from_location(&self, location: Location) -> Option<Definition> {
         self.definitions
-            .binary_search_by(|definition| cmp_ranges(&location.range, &definition.location.range))
+            .binary_search_by(|definition| definition.cmp_location(&location))
             .ok()
             .map(|i| self.definitions[i].clone())
     }
@@ -177,16 +177,6 @@ impl Iterator for FindReferencesIter<'_> {
     }
 }
 
-fn cmp_ranges(range1: &Range, range2: &Range) -> Ordering {
-    if range1.start < range2.start {
-        Ordering::Less
-    } else if range1.end > range2.end {
-        Ordering::Greater
-    } else {
-        Ordering::Equal
-    }
-}
-
 fn cmp_position_to_range(position: Position, range: &Range) -> Ordering {
     if position < range.start {
         Ordering::Greater
@@ -225,6 +215,16 @@ impl Definition {
             } else {
                 Some(children)
             },
+        }
+    }
+
+    fn cmp_location(&self, location: &Location) -> Ordering {
+        if self.location.range.start < location.range.start {
+            Ordering::Less
+        } else if self.location.range.end > location.range.end {
+            Ordering::Greater
+        } else {
+            Ordering::Equal
         }
     }
 }
