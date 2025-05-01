@@ -128,21 +128,25 @@ impl LanguageServer for KotoServer {
                     if location.uri.as_ref() == &uri {
                         info.get_definition_from_location(location)
                             .map(|definition| {
-                                let symbol = DocumentSymbol::from(&definition);
-                                format!("**{}**  \n{:?} reference", symbol.name, symbol.kind,)
+                                format!(
+                                    "**{}**  \n{:?} reference",
+                                    definition.id.as_str(),
+                                    definition.kind,
+                                )
                             })
                     } else {
                         lock_await.get(&location.uri).and_then(|info| {
-                            // TODO: needs module name list at source info to retrieve modulename
+                            // Module reference
                             if location.range.end.character == 0 && location.range.end.line == 0 {
-                                Some(format!("**{}**  \n{:?}", "modulename", "Module",))
+                                // TODO: proper way to handle module names
+                                None
                             } else {
                                 info.get_definition_from_location(location)
                                     .map(|definition| {
-                                        let symbol = DocumentSymbol::from(&definition);
                                         format!(
                                             "**{}**  \n{:?} reference (from module)",
-                                            symbol.name, symbol.kind,
+                                            definition.id.as_str(),
+                                            definition.kind,
                                         )
                                     })
                             }
@@ -152,8 +156,11 @@ impl LanguageServer for KotoServer {
                 .or_else(|| {
                     info.get_definition_from_position(position)
                         .map(|definition| {
-                            let symbol = DocumentSymbol::from(&definition);
-                            format!("**{}**  \n{:?} definition", symbol.name, symbol.kind,)
+                            format!(
+                                "**{}**  \n{:?} definition",
+                                definition.id.as_str(),
+                                definition.kind,
+                            )
                         })
                 })
         });

@@ -83,15 +83,7 @@ impl SourceInfo {
                 cmp_position_to_range(position, &definition.location.range)
             })
             .ok()
-            .and_then(|i| {
-                let location = self.definitions[i].location.clone();
-                self.definitions
-                    .binary_search_by(|definition| {
-                        cmp_ranges(&location.range, &definition.location.range)
-                    })
-                    .ok()
-                    .map(|i| self.definitions[i].clone())
-            })
+            .and_then(|i| self.get_definition_from_location(self.definitions[i].location.clone()))
     }
 
     pub fn get_referenced_definition_location(&self, position: Position) -> Option<Location> {
@@ -104,12 +96,7 @@ impl SourceInfo {
     }
 
     pub fn get_definition_location(&self, position: Position) -> Option<Location> {
-        self.references
-            .binary_search_by(|reference| {
-                cmp_position_to_range(position, &reference.location.range)
-            })
-            .ok()
-            .map(|i| self.references[i].definition.clone())
+        self.get_referenced_definition_location(position)
             .or_else(|| {
                 self.definitions
                     .binary_search_by(|definition| {
@@ -192,9 +179,9 @@ impl Iterator for FindReferencesIter<'_> {
 
 fn cmp_ranges(range1: &Range, range2: &Range) -> Ordering {
     if range1.start < range2.start {
-        Ordering::Greater
-    } else if range1.end > range2.end {
         Ordering::Less
+    } else if range1.end > range2.end {
+        Ordering::Greater
     } else {
         Ordering::Equal
     }
@@ -213,8 +200,8 @@ fn cmp_position_to_range(position: Position, range: &Range) -> Ordering {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Definition {
     location: Location,
-    id: StringSlice<usize>,
-    kind: SymbolKind,
+    pub id: StringSlice<usize>,
+    pub kind: SymbolKind,
     // true for definitions at the top-level of the script, i.e. not in a function
     top_level: bool,
     children: Option<Vec<Definition>>,
