@@ -72,7 +72,9 @@ impl SourceInfo {
 
     pub fn get_definition_from_location(&self, location: Location) -> Option<Definition> {
         self.definitions
-            .binary_search_by(|definition| definition.cmp_location(&location))
+            .binary_search_by(|definition| {
+                cmp_range_to_range(&definition.location.range, location.range)
+            })
             .ok()
             .map(|i| self.definitions[i].clone())
     }
@@ -80,7 +82,7 @@ impl SourceInfo {
     pub fn get_definition_from_position(&self, position: Position) -> Option<Definition> {
         self.definitions
             .binary_search_by(|definition| {
-                cmp_position_to_range(position, &definition.location.range)
+                cmp_range_to_position(&definition.location.range, position)
             })
             .ok()
             .and_then(|i| self.get_definition_from_location(self.definitions[i].location.clone()))
@@ -89,7 +91,7 @@ impl SourceInfo {
     pub fn get_referenced_definition_location(&self, position: Position) -> Option<Location> {
         self.references
             .binary_search_by(|reference| {
-                cmp_position_to_range(position, &reference.location.range)
+                cmp_range_to_position(&reference.location.range, position)
             })
             .ok()
             .map(|i| self.references[i].definition.clone())
@@ -100,7 +102,7 @@ impl SourceInfo {
             .or_else(|| {
                 self.definitions
                     .binary_search_by(|definition| {
-                        cmp_position_to_range(position, &definition.location.range)
+                        cmp_range_to_position(&definition.location.range, position)
                     })
                     .ok()
                     .map(|i| self.definitions[i].location.clone())
@@ -177,11 +179,21 @@ impl Iterator for FindReferencesIter<'_> {
     }
 }
 
-fn cmp_position_to_range(position: Position, range: &Range) -> Ordering {
-    if position < range.start {
+fn cmp_range_to_position(range: &Range, position: Position) -> Ordering {
+    if range.start > position {
         Ordering::Greater
-    } else if position >= range.end {
+    } else if range.end <= position {
         Ordering::Less
+    } else {
+        Ordering::Equal
+    }
+}
+
+fn cmp_range_to_range(range_lhs: &Range, range_rhs: Range) -> Ordering {
+    if range_lhs.start < range_rhs.start {
+        Ordering::Less
+    } else if range_lhs.end > range_rhs.end {
+        Ordering::Greater
     } else {
         Ordering::Equal
     }
@@ -215,16 +227,6 @@ impl Definition {
             } else {
                 Some(children)
             },
-        }
-    }
-
-    fn cmp_location(&self, location: &Location) -> Ordering {
-        if self.location.range.start < location.range.start {
-            Ordering::Less
-        } else if self.location.range.end > location.range.end {
-            Ordering::Greater
-        } else {
-            Ordering::Equal
         }
     }
 }
