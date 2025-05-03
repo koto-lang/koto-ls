@@ -70,6 +70,7 @@ impl LanguageServer for KotoServer {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
@@ -114,6 +115,67 @@ impl LanguageServer for KotoServer {
                 .log_message(MessageType::INFO, "No changes?")
                 .await;
         }
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let lock_await = self.source_info.lock().await;
+        let result = lock_await.get(&uri).and_then(|info| {
+            info.get_referenced_definition_location(position)
+                .and_then(|location| {
+                    if location.uri.as_ref() == &uri {
+                        info.get_definition_from_location(location)
+                            .map(|definition| {
+                                format!(
+                                    "**{}**  \n{:?} reference",
+                                    definition.id.as_str(),
+                                    definition.kind,
+                                )
+                            })
+                    } else {
+                        lock_await.get(&location.uri).and_then(|info| {
+                            // Module reference
+                            if location.range.end.character == 0 && location.range.end.line == 0 {
+                                // TODO: proper way to handle module names
+                                None
+                            } else {
+                                info.get_definition_from_location(location)
+                                    .map(|definition| {
+                                        format!(
+                                            "**{}**  \n{:?} reference (from module)",
+                                            definition.id.as_str(),
+                                            definition.kind,
+                                        )
+                                    })
+                            }
+                        })
+                    }
+                })
+                .or_else(|| {
+                    info.get_definition_from_position(position)
+                        .map(|definition| {
+                            format!(
+                                "**{}**  \n{:?} definition",
+                                definition.id.as_str(),
+                                definition.kind,
+                            )
+                        })
+                })
+        });
+
+        Ok(if result.is_none() {
+            self.client
+                .log_message(MessageType::INFO, "No definition found")
+                .await;
+            None
+        } else {
+            result.map(|text| Hover {
+                contents: HoverContents::Scalar(MarkedString::String(text)),
+                range: None,
+            })
+        })
     }
 
     async fn goto_definition(
