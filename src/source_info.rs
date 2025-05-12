@@ -327,6 +327,7 @@ impl<'i> SourceInfoBuilder<'i> {
             | Node::Int(_)
             | Node::Float(_)
             | Node::RangeFull
+            | Node::MapEntry(..) // Map entries are visited in visit_map
             | Node::Continue
             | Node::Self_
             | Node::Type { .. }
@@ -347,7 +348,7 @@ impl<'i> SourceInfoBuilder<'i> {
             }
             // Nodes with a list of nodes that should be visited
             Node::List(nodes)
-            | Node::Tuple(nodes)
+            | Node::Tuple{elements: nodes, ..}
             | Node::TempTuple(nodes)
             | Node::Block(nodes) => self.visit_nested(nodes, ctx.default()),
             // Nodes with an optional child node
@@ -378,17 +379,22 @@ impl<'i> SourceInfoBuilder<'i> {
                 self.visit_node(*start, ctx.default());
                 self.visit_node(*end, ctx.default());
             }
-            Node::Map(entries) => child_definitions = self.visit_map(entries, &ctx),
+            Node::Map { entries, .. } => child_definitions = self.visit_map(entries, &ctx),
             Node::MainBlock { body, local_count } => {
                 self.push_frame(*local_count);
                 self.visit_nested(body, ctx.default());
                 self.pop_frame();
             }
             Node::Function(info) => {
-                self.push_frame(info.local_count + info.args.len());
-                self.visit_nested(&info.args, ctx.with_ids_as_definitions());
+                self.push_frame(info.local_count);
+                self.visit_node(info.args, ctx.default());
                 self.visit_node(info.body, ctx.default());
                 self.pop_frame();
+            }
+            Node::FunctionArgs{args, .. } => {
+                let definitions = &mut self.frame_mut().definitions;
+                definitions.reserve(definitions.capacity() + args.len());
+                self.visit_nested(args, ctx.with_ids_as_definitions());
             }
             Node::Import { from, items } => self.visit_import(from, items, &ctx),
             Node::Export(item) => {
@@ -481,21 +487,23 @@ impl<'i> SourceInfoBuilder<'i> {
         }
     }
 
-    fn visit_map(
-        &mut self,
-        entries: &[(AstIndex, Option<AstIndex>)],
-        ctx: &Context,
-    ) -> Vec<Definition> {
+    fn visit_map(&mut self, entries: &[AstIndex], ctx: &Context) -> Vec<Definition> {
         let mut child_definitions = Vec::new();
 
-        for (key, value) in entries.iter() {
-            let key_node = ctx.node(*key);
+        for entry in entries.iter() {
+            let entry_node = ctx.node(*entry);
+            let (key_node, value) = match &entry_node.node {
+                Node::Id(..) => (entry_node, None),
+                Node::MapEntry(key, value) => (ctx.node(*key), Some(*value)),
+                _ => continue,
+            };
+
             match &key_node.node {
-                Node::Str(s) => self.visit_string(s, ctx.default()),
+                Node::Str(s) => self.visit_string(&s, ctx.default()),
                 Node::Id(id, _type_hint) => {
                     // Shorthand syntax?
                     if value.is_none() {
-                        self.add_reference(*id, key_node, ctx.ast);
+                        self.add_reference(*id, entry_node, ctx.ast);
                     }
 
                     // Count the map key as a top-level definition?
@@ -534,7 +542,7 @@ impl<'i> SourceInfoBuilder<'i> {
                 _ => {}
             }
             if let Some(value) = value {
-                self.visit_node(*value, ctx.default());
+                self.visit_node(value, ctx.default());
             }
         }
 
@@ -807,17 +815,13 @@ impl<'i> SourceInfoBuilder<'i> {
         ast: &Ast,
     ) {
         let span = ast.span(node.span);
-        self.frames
-            .last_mut()
-            .expect("Missing frame")
-            .add_definition(id, Location::new(self.uri.clone(), *span), kind, children);
+        let uri = self.uri.clone();
+        self.frame_mut()
+            .add_definition(id, Location::new(uri, *span), kind, children);
     }
 
     fn add_imported_definition(&mut self, definition: Definition) {
-        self.frames
-            .last_mut()
-            .expect("Missing frame")
-            .add_imported_definition(definition);
+        self.frame_mut().add_imported_definition(definition);
     }
 
     fn add_reference(&mut self, id: ConstantIndex, node: &AstNode, ast: &Ast) {
@@ -859,6 +863,10 @@ impl<'i> SourceInfoBuilder<'i> {
         } else {
             None
         }
+    }
+
+    fn frame_mut(&mut self) -> &mut Frame {
+        self.frames.last_mut().expect("Missing frame")
     }
 
     fn push_frame(&mut self, locals_capacity: usize) {
