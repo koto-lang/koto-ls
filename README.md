@@ -15,11 +15,12 @@ To install the development version of `koto-ls`, run `cargo install --path .` in
 Along with reporting compilation errors,
 the following LSP features are supported by `koto-ls`:
 
-- Get document symbols
-- Goto definition
-- Find references
-- Document highlights
-- Rename symbol
+- [Get document symbols][document-symbols]
+- [Goto definition][goto-definition]
+- [Find references][find-references]
+- [Document highlights][document-highlights]
+- [Rename symbol][rename-symbol]
+- [Hover][hover]
 
 ## Editor Setup
 
@@ -40,7 +41,7 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 ```
 
-### Helix
+### [Helix][helix]
 
 Helix has built-in support for Koto since version `25.01`, and will make use of `koto-ls` if it's available in your path.
 
@@ -61,8 +62,19 @@ roots = []
 language-servers = [ "koto-ls" ]
 ```
 
-[find-references]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_references
+### [Zed][zed]
+
+`koto-ls` can be used with zed's LSP support via user-installable [`koto-zed`][koto-zed] extension that runs each time a `.koto` file is opened.
+
+
 [goto-definition]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition
+[find-references]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_references
+[document-symbols]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentSymbol
+[document-highlights]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentHighlight
+[rename-symbol]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_rename
+[hover]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover
 [helix]: https://docs.helix-editor.com/languages.html
+[zed]: https://zed.dev/extensions?query=Koto&filter=language-servers
+[koto-zed]: https://github.com/koto-lang/koto-zed
 [koto]: https://koto.dev
 [lsp]: https://microsoft.github.io/language-server-protocol/
