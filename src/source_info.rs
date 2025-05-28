@@ -401,10 +401,11 @@ impl<'i> SourceInfoBuilder<'i> {
                 // Set id_is_definition to true to count exported map keys as definitions
                 self.visit_node(*item, ctx.with_ids_as_definitions());
             }
-            Node::Assign { target, expression } => self.visit_assign(*target, *expression, &ctx),
+            Node::Assign { target, expression, .. } => self.visit_assign(*target, *expression, &ctx),
             Node::MultiAssign {
                 targets,
                 expression,
+                ..
             } => {
                 self.visit_node(*expression, ctx.default());
                 self.visit_nested(targets, ctx.with_ids_as_definitions());
@@ -427,22 +428,30 @@ impl<'i> SourceInfoBuilder<'i> {
             Node::Match { expression, arms } => {
                 self.visit_node(*expression, ctx.default());
                 for arm in arms.iter() {
-                    for pattern in arm.patterns.iter() {
+                    self.visit_node(*arm, ctx.default());
+                }
+            }
+            Node::MatchArm { patterns, condition, expression } =>
+            {
+                    for pattern in patterns.iter() {
                         self.visit_node(*pattern, ctx.with_ids_as_definitions());
                     }
-                    if let Some(condition) = arm.condition {
-                        self.visit_node(condition, ctx.default());
+                    if let Some(condition) = condition {
+                        self.visit_node(*condition, ctx.default());
                     }
-                    self.visit_node(arm.expression, ctx.default());
-                }
+                    self.visit_node(*expression, ctx.default());
+                
             }
             Node::Switch(arms) => {
                 for arm in arms.iter() {
-                    if let Some(condition) = arm.condition {
-                        self.visit_node(condition, ctx.default());
-                    }
-                    self.visit_node(arm.expression, ctx.default());
+                    self.visit_node(*arm, ctx.default());
                 }
+            }
+            Node::SwitchArm { condition, expression } => {
+                                    if let Some(condition) = condition {
+                        self.visit_node(*condition, ctx.default());
+                    }
+                    self.visit_node(*expression, ctx.default());
             }
             Node::PackedId(maybe_id) => {
                 if let Some(id) = maybe_id {
