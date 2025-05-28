@@ -327,11 +327,12 @@ impl<'i> SourceInfoBuilder<'i> {
             | Node::Int(_)
             | Node::Float(_)
             | Node::RangeFull
-            | Node::MapEntry(..) // Map entries are visited in visit_map
             | Node::Continue
             | Node::Self_
             | Node::Type { .. }
             | Node::Wildcard(..) => {}
+            // Map entries are visited in visit_map
+            Node::MapEntry(..) => {}
             // Nodes with a single child node that should be visited
             Node::Nested(node)
             | Node::RangeFrom { start: node }
@@ -348,7 +349,9 @@ impl<'i> SourceInfoBuilder<'i> {
             }
             // Nodes with a list of nodes that should be visited
             Node::List(nodes)
-            | Node::Tuple{elements: nodes, ..}
+            | Node::Tuple {
+                elements: nodes, ..
+            }
             | Node::TempTuple(nodes)
             | Node::Block(nodes) => self.visit_nested(nodes, ctx.default()),
             // Nodes with an optional child node
@@ -391,7 +394,7 @@ impl<'i> SourceInfoBuilder<'i> {
                 self.visit_node(info.body, ctx.default());
                 self.pop_frame();
             }
-            Node::FunctionArgs{args, .. } => {
+            Node::FunctionArgs { args, .. } => {
                 let definitions = &mut self.frame_mut().definitions;
                 definitions.reserve(definitions.capacity() + args.len());
                 self.visit_nested(args, ctx.with_ids_as_definitions());
@@ -401,7 +404,9 @@ impl<'i> SourceInfoBuilder<'i> {
                 // Set id_is_definition to true to count exported map keys as definitions
                 self.visit_node(*item, ctx.with_ids_as_definitions());
             }
-            Node::Assign { target, expression, .. } => self.visit_assign(*target, *expression, &ctx),
+            Node::Assign {
+                target, expression, ..
+            } => self.visit_assign(*target, *expression, &ctx),
             Node::MultiAssign {
                 targets,
                 expression,
@@ -431,27 +436,32 @@ impl<'i> SourceInfoBuilder<'i> {
                     self.visit_node(*arm, ctx.default());
                 }
             }
-            Node::MatchArm { patterns, condition, expression } =>
-            {
-                    for pattern in patterns.iter() {
-                        self.visit_node(*pattern, ctx.with_ids_as_definitions());
-                    }
-                    if let Some(condition) = condition {
-                        self.visit_node(*condition, ctx.default());
-                    }
-                    self.visit_node(*expression, ctx.default());
-                
+            Node::MatchArm {
+                patterns,
+                condition,
+                expression,
+            } => {
+                for pattern in patterns.iter() {
+                    self.visit_node(*pattern, ctx.with_ids_as_definitions());
+                }
+                if let Some(condition) = condition {
+                    self.visit_node(*condition, ctx.default());
+                }
+                self.visit_node(*expression, ctx.default());
             }
             Node::Switch(arms) => {
                 for arm in arms.iter() {
                     self.visit_node(*arm, ctx.default());
                 }
             }
-            Node::SwitchArm { condition, expression } => {
-                                    if let Some(condition) = condition {
-                        self.visit_node(*condition, ctx.default());
-                    }
-                    self.visit_node(*expression, ctx.default());
+            Node::SwitchArm {
+                condition,
+                expression,
+            } => {
+                if let Some(condition) = condition {
+                    self.visit_node(*condition, ctx.default());
+                }
+                self.visit_node(*expression, ctx.default());
             }
             Node::PackedId(maybe_id) => {
                 if let Some(id) = maybe_id {
