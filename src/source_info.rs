@@ -330,7 +330,7 @@ impl<'i> SourceInfoBuilder<'i> {
             | Node::Continue
             | Node::Self_
             | Node::Type { .. }
-            | Node::Wildcard(..) => {}
+            | Node::Ignored(..) => {}
             // Map entries are visited in visit_map
             Node::MapEntry(..) => {}
             // Nodes with a single child node that should be visited
