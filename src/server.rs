@@ -21,7 +21,7 @@ impl KotoServer {
         }
     }
 
-    async fn compile(&self, script: &str, uri: Uri, version: i32) {
+    async fn compile(&self, script: String, uri: Uri, version: i32) {
         if self
             .source_info
             .lock()
@@ -79,6 +79,7 @@ impl LanguageServer for KotoServer {
                     prepare_provider: Some(true),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 ..default()
             },
         })
@@ -86,7 +87,7 @@ impl LanguageServer for KotoServer {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "initialized!")
+            .log_message(MessageType::INFO, "initialized")
             .await;
     }
 
@@ -95,26 +96,14 @@ impl LanguageServer for KotoServer {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.client
-            .log_message(MessageType::INFO, "file opened!")
-            .await;
-
         let doc = params.text_document;
-        self.compile(&doc.text, doc.uri, doc.version).await;
+        self.compile(doc.text, doc.uri, doc.version).await;
     }
 
-    async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        self.client
-            .log_message(MessageType::INFO, "file changed!")
-            .await;
-        if let Some(change) = params.content_changes.first() {
-            let doc = params.text_document;
-            self.compile(&change.text, doc.uri, doc.version).await;
-        } else {
-            self.client
-                .log_message(MessageType::INFO, "No changes?")
-                .await;
-        }
+    async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
+        let change = params.content_changes.swap_remove(0);
+        let doc = params.text_document;
+        self.compile(change.text, doc.uri, doc.version).await;
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -273,6 +262,38 @@ impl LanguageServer for KotoServer {
         }
 
         Ok(result)
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+
+        let format_options = koto_format::FormatOptions {
+            indent_width: params.options.tab_size as u8,
+            ..Default::default()
+        };
+
+        let Some(info) = self.source_info.lock().await.get(&uri) else {
+            self.client
+                .log_message(MessageType::ERROR, "No references found")
+                .await;
+            return Err(Error::invalid_params("No source information available"));
+        };
+
+        match koto_format::format(info.source(), format_options) {
+            Ok(formatted) => {
+                let edit = TextEdit::new(
+                    Range::new(Position::new(0, 0), Position::new(u32::MAX, u32::MAX)),
+                    formatted,
+                );
+                Ok(Some(vec![edit]))
+            }
+            Err(e) => {
+                self.client
+                    .log_message(MessageType::ERROR, e.to_string())
+                    .await;
+                Ok(None)
+            }
+        }
     }
 
     async fn prepare_rename(

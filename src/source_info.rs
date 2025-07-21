@@ -36,6 +36,8 @@ impl Error {
 /// Analyzed information about the contents of a source file
 #[derive(Clone, Debug, Default)]
 pub struct SourceInfo {
+    // The source file's contents
+    source: String,
     // A vec of all definitions, sorted by start position
     definitions: Vec<Definition>,
     // A vec of all references, sorted by start position
@@ -46,9 +48,9 @@ pub struct SourceInfo {
 
 impl SourceInfo {
     /// Returns a [SourceInfo] containing the result of analyzing the given script
-    pub fn new(script: &str, uri: Arc<Uri>, info_cache: &mut InfoCache) -> Self {
+    pub fn new(script: String, uri: Arc<Uri>, info_cache: &mut InfoCache) -> Self {
         let mut error = None;
-        let ast = match Parser::parse(script) {
+        let ast = match Parser::parse(&script) {
             Ok(ast) => ast,
             Err(mut parse_error) => {
                 if let Some(ast) = parse_error.ast.take() {
@@ -67,7 +69,11 @@ impl SourceInfo {
                 error = Some(compile_error.into())
             }
         }
-        SourceInfoBuilder::from_ast(&ast, uri, info_cache).build(error)
+        SourceInfoBuilder::from_ast(&ast, script, uri, info_cache).build(error)
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
     }
 
     pub fn get_definition_from_location(&self, location: Location) -> Option<Definition> {
@@ -260,9 +266,11 @@ pub struct Reference {
 }
 
 struct SourceInfoBuilder<'i> {
-    // The uri of the file that is being scanned
+    // The contents of the file that's being scanned
+    script: String,
+    // The uri of the file that's being scanned
     uri: Arc<Uri>,
-    // A cache that is used when importing modules
+    // A cache that gets checked while importing modules
     #[allow(unused)]
     info_cache: &'i mut InfoCache,
     // A stack of frames, each time a function is encountered a new frame is added to the stack
@@ -279,8 +287,9 @@ struct SourceInfoBuilder<'i> {
 }
 
 impl<'i> SourceInfoBuilder<'i> {
-    fn from_ast(ast: &Ast, uri: Arc<Uri>, info_cache: &'i mut InfoCache) -> Self {
+    fn from_ast(ast: &Ast, script: String, uri: Arc<Uri>, info_cache: &'i mut InfoCache) -> Self {
         let mut result = Self {
+            script,
             uri,
             info_cache,
             frames: Vec::new(),
@@ -307,6 +316,7 @@ impl<'i> SourceInfoBuilder<'i> {
         ));
 
         SourceInfo {
+            source: self.script,
             definitions: self.definitions,
             references: self.references,
             error,
@@ -736,7 +746,7 @@ impl<'i> SourceInfoBuilder<'i> {
         let Ok(script) = fs::read_to_string(&path) else {
             return;
         };
-        let info = SourceInfo::new(&script, url.clone(), self.info_cache);
+        let info = SourceInfo::new(script, url.clone(), self.info_cache);
         self.info_cache.insert(url, modified_time.into(), info);
     }
 
@@ -1027,7 +1037,7 @@ mod test {
 
         fn goto_definition_test(script: &str, cases: &[(Position, Option<Range>)]) -> Result<()> {
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script, test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
 
             for (i, (position, expected)) in cases.iter().enumerate() {
                 let result = info.get_definition_location(*position);
@@ -1103,7 +1113,7 @@ f a
             cases: &[(Position, Option<&[Range]>, bool)],
         ) -> Result<()> {
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script, test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
 
             for (i, (position, expected_references, include_definition)) in cases.iter().enumerate()
             {
@@ -1379,7 +1389,7 @@ x = |y| y.baz = bar
             expected_definitions: &[TestDefinition],
         ) -> Result<()> {
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script, test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
             let definitions = info.top_level_definitions().collect::<Vec<_>>();
 
             for (i, (expected, actual)) in expected_definitions

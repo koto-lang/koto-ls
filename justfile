@@ -7,7 +7,7 @@ test *args:
   cargo test {{args}}
 
 update_koto: 
-  cargo update -p koto_bytecode -p koto_parser
+  cargo update -p koto_bytecode -p koto_format -p koto_parser
 
 watch command *args:
   cargo watch -s "just {{command}} {{args}}"

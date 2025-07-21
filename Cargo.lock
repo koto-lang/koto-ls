@@ -242,6 +242,7 @@ dependencies = [
  "anyhow",
  "is_sorted",
  "koto_bytecode",
+ "koto_format",
  "koto_parser",
  "thiserror",
  "tokio",
@@ -262,6 +263,19 @@ dependencies = [
  "rustc-hash",
  "smallvec",
  "thiserror",
+]
+
+[[package]]
+name = "koto_format"
+version = "0.16.0"
+source = "git+https://github.com/koto-lang/koto#94fa9a0218e43b3d82b2309993e058d5ab1be13b"
+dependencies = [
+ "derive-name",
+ "koto_lexer",
+ "koto_parser",
+ "serde",
+ "thiserror",
+ "unicode-width",
 ]
 
 [[package]]
@@ -415,6 +429,12 @@ dependencies = [
  "smallvec",
  "windows-targets",
 ]
+
+[[package]]
+name = "percent-encoding"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
 name = "pin-project-lite"
@@ -676,9 +696,9 @@ checksum = "121c2a6cda46980bb0fcd1647ffaf6cd3fc79a013de288782836f6df9c48780e"
 
 [[package]]
 name = "tower-lsp-server"
-version = "0.21.1"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fade4c658b63d11b623ddfa80821901e943a2923a010ae4a038661de42bd377"
+checksum = "76cd168c085174eafa7492a519715f2d59436dc28cdfd9d13a5b864246899db9"
 dependencies = [
  "bytes",
  "dashmap",
@@ -686,6 +706,7 @@ dependencies = [
  "httparse",
  "lsp-types",
  "memchr",
+ "percent-encoding",
  "serde",
  "serde_json",
  "tokio",

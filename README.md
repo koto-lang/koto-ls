@@ -15,12 +15,13 @@ To install the development version of `koto-ls`, run `cargo install --path .` in
 Along with reporting compilation errors,
 the following LSP features are supported by `koto-ls`:
 
+- [Document formatting][document-formatting]
+- [Document highlights][document-highlights]
+- [Find references][find-references]
 - [Get document symbols][document-symbols]
 - [Goto definition][goto-definition]
-- [Find references][find-references]
-- [Document highlights][document-highlights]
-- [Rename symbol][rename-symbol]
 - [Hover][hover]
+- [Rename symbol][rename-symbol]
 
 ## Editor Setup
 
@@ -67,12 +68,13 @@ language-servers = [ "koto-ls" ]
 `koto-ls` can be used with zed's LSP support via user-installable [`koto-zed`][koto-zed] extension that runs each time a `.koto` file is opened.
 
 
-[goto-definition]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition
-[find-references]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_references
-[document-symbols]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentSymbol
 [document-highlights]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentHighlight
-[rename-symbol]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_rename
+[document-formatting]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_formatting
+[document-symbols]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentSymbol
+[find-references]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_references
+[goto-definition]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition
 [hover]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover
+[rename-symbol]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_rename
 [helix]: https://docs.helix-editor.com/languages.html
 [zed]: https://zed.dev/extensions?query=Koto&filter=language-servers
 [koto-zed]: https://github.com/koto-lang/koto-zed
