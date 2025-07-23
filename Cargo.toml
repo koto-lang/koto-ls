@@ -34,10 +34,10 @@ version = "0.16.0"
 default-features = false
 features = ["arc", "error_ast"]
 
-[patch.crates-io]
-koto_bytecode = { git = "https://github.com/koto-lang/koto" }
-koto_format = { git = "https://github.com/koto-lang/koto" }
-koto_parser = { git = "https://github.com/koto-lang/koto" }
+# [patch.crates-io]
+# koto_bytecode = { git = "https://github.com/koto-lang/koto" }
+# koto_format = { git = "https://github.com/koto-lang/koto" }
+# koto_parser = { git = "https://github.com/koto-lang/koto" }
 
 [profile.release]
 codegen-units = 1
