@@ -237,7 +237,7 @@ checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
 name = "koto-ls"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "is_sorted",
@@ -252,9 +252,8 @@ dependencies = [
 
 [[package]]
 name = "koto_bytecode"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7e95ab0ab9f580d19e7f17c212996444f03d8f52aaa4f598ca40e45d5234640"
+version = "0.17.0"
+source = "git+https://github.com/koto-lang/koto#c72917cd215a8f7be627b8311d67ecb8750cadf8"
 dependencies = [
  "circular-buffer",
  "derive-name",
@@ -268,9 +267,8 @@ dependencies = [
 
 [[package]]
 name = "koto_format"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c79d308409691435fc42f6cc375772acac944e008c0a60b8423178e319ba7aa"
+version = "0.17.0"
+source = "git+https://github.com/koto-lang/koto#c72917cd215a8f7be627b8311d67ecb8750cadf8"
 dependencies = [
  "derive-name",
  "koto_lexer",
@@ -282,9 +280,8 @@ dependencies = [
 
 [[package]]
 name = "koto_lexer"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "109765b6fd703ea2cbfd7dd5dc40e5504fe48983f71120643e2ca3ad3a4f5d56"
+version = "0.17.0"
+source = "git+https://github.com/koto-lang/koto#c72917cd215a8f7be627b8311d67ecb8750cadf8"
 dependencies = [
  "unicode-segmentation",
  "unicode-width",
@@ -293,18 +290,16 @@ dependencies = [
 
 [[package]]
 name = "koto_memory"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7d7d1b8f793ca3215b88ad73dc9697e28585bfd45ec7b0acc28a6dcf4009a5e"
+version = "0.17.0"
+source = "git+https://github.com/koto-lang/koto#c72917cd215a8f7be627b8311d67ecb8750cadf8"
 dependencies = [
  "parking_lot",
 ]
 
 [[package]]
 name = "koto_parser"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce05b350e021edbd90ecf80ef01fe66071c50133503dec82ffa64b6f0397ed37"
+version = "0.17.0"
+source = "git+https://github.com/koto-lang/koto#c72917cd215a8f7be627b8311d67ecb8750cadf8"
 dependencies = [
  "derive-name",
  "koto_lexer",
