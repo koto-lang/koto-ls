@@ -11,13 +11,16 @@ license = "MIT"
 readme = "README.md"
 repository = "https://github.com/koto-lang/koto-ls"
 
+[features]
+log = ["tracing-subscriber"]
+
 [dependencies]
 anyhow = "1.0.82"
 is_sorted = "0.1.1"
 thiserror = "2"
 tokio = { version = "1.37.0", features = ["full"] }
 tower-lsp-server = "0.22"
-tracing-subscriber = "0.3.18"
+tracing-subscriber = { version = "0.3.18", optional = true }
 
 [dependencies.koto_bytecode]
 version = "0.17.0"
