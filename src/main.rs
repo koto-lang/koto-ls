@@ -8,7 +8,11 @@ use tower_lsp_server::{LspService, Server};
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().init();
+    #[cfg(feature = "log")]
+    {
+        tracing_subscriber::fmt().init();
+    }
+
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
     let (service, socket) = LspService::new(KotoServer::new);
     Server::new(stdin, stdout, socket).serve(service).await;
