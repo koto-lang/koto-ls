@@ -25,22 +25,6 @@ the following LSP features are supported by `koto-ls`:
 
 ## Editor Setup
 
-### Neovim
-
-`koto-ls` can be used with neovim's built-in LSP support by creating an autocmd
-that runs each time a `.koto` file is opened.
-
-```lua
-vim.api.nvim_create_autocmd("FileType", {
-  pattern = "koto",
-  callback = function()
-    vim.lsp.start({
-      cmd = { "koto-ls" },
-      root_dir = vim.fn.getcwd(),
-    })
-  end
-})
-```
 
 ### [Helix][helix]
 
@@ -63,20 +47,53 @@ roots = []
 language-servers = [ "koto-ls" ]
 ```
 
+### Neovim
+
+`koto-ls` can be used with neovim's built-in LSP support by creating an autocmd
+that runs each time a `.koto` file is opened.
+
+```lua
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "koto",
+  callback = function()
+    vim.lsp.start({
+      cmd = { "koto-ls" },
+      root_dir = vim.fn.getcwd(),
+    })
+  end
+})
+```
+
+### [Sublime Text][sublime]
+
+After following the [LSP setup instructions][sublime-lsp] and installing the [`koto` package][sublime-koto], you can enable `koto-ls` by adding the following to the `"clients"` list in your LSP settings:
+
+```json
+"koto-ls": {
+    "enabled": true,
+    "command": ["koto-ls"],
+    "selector": "source.koto"
+}
+```
+
+
 ### [Zed][zed]
 
 `koto-ls` can be used with zed's LSP support via user-installable [`koto-zed`][koto-zed] extension that runs each time a `.koto` file is opened.
 
 
-[document-highlights]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentHighlight
 [document-formatting]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_formatting
+[document-highlights]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentHighlight
 [document-symbols]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentSymbol
 [find-references]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_references
 [goto-definition]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition
-[hover]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover
-[rename-symbol]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_rename
 [helix]: https://docs.helix-editor.com/languages.html
-[zed]: https://zed.dev/extensions?query=Koto&filter=language-servers
+[hover]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover
 [koto-zed]: https://github.com/koto-lang/koto-zed
 [koto]: https://koto.dev
 [lsp]: https://microsoft.github.io/language-server-protocol/
+[rename-symbol]: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_rename
+[sublime]: https://www.sublimetext.com
+[sublime-koto]: https://packagecontrol.io/packages/Koto
+[sublime-lsp]: https://lsp.sublimetext.io
+[zed]: https://zed.dev/extensions?query=Koto&filter=language-servers
