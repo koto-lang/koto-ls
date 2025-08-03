@@ -42,8 +42,25 @@ pub struct SourceInfo {
     definitions: Vec<Definition>,
     // A vec of all references, sorted by start position
     references: Vec<Reference>,
+    // A vec of all scopes, sorted by start position
+    scopes: Vec<ScopeInfo>,
     /// If an error was encountered while compiling the script it's cached here
     pub error: Option<Error>,
+}
+
+/// Information about a scope (function, block, etc.)
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScopeInfo {
+    pub range: Range,
+    pub kind: ScopeKind,
+    pub parent_scope: Option<usize>, // Index into scopes vec
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ScopeKind {
+    Global,
+    Function,
+    Block,
 }
 
 impl SourceInfo {
@@ -136,8 +153,54 @@ impl SourceInfo {
 
     pub fn get_autocomplete_items(&self, position: Position) -> impl Iterator<Item = &Definition> {
         self.definitions.iter().filter(move |definition| {
-            definition.location.range.end <= position && definition.top_level
+            definition.location.range.end <= position
+                && (definition.top_level || self.is_definition_in_scope(definition, position))
         })
+    }
+
+    fn is_definition_in_scope(&self, definition: &Definition, position: Position) -> bool {
+        // Find which scope the position is in
+        let position_scope_index = self.get_scope_at_position(position);
+
+        // Check if the definition's scope is accessible from the position's scope
+        self.is_scope_accessible(definition.scope_index, position_scope_index)
+    }
+
+    fn get_scope_at_position(&self, position: Position) -> usize {
+        // Find the innermost scope that contains the position
+        for (index, scope) in self.scopes.iter().enumerate().rev() {
+            if position >= scope.range.start && position <= scope.range.end {
+                return index;
+            }
+        }
+        0 // Root scope if no specific scope found
+    }
+
+    fn is_scope_accessible(&self, definition_scope: usize, position_scope: usize) -> bool {
+        // A definition is accessible if:
+        // 1. It's in the same scope as the position
+        // 2. It's in a parent scope of the position
+        // 3. It's in the root scope (global)
+
+        if definition_scope == position_scope {
+            return true;
+        }
+
+        // Check if definition_scope is a parent of position_scope
+        let mut current_scope = position_scope;
+        while current_scope < self.scopes.len() {
+            if current_scope == definition_scope {
+                return true;
+            }
+            // Move to parent scope
+            if let Some(parent) = self.scopes[current_scope].parent_scope {
+                current_scope = parent;
+            } else {
+                break;
+            }
+        }
+
+        false
     }
 }
 
@@ -218,6 +281,8 @@ pub struct Definition {
     pub kind: SymbolKind,
     // true for definitions at the top-level of the script, i.e. not in a function
     top_level: bool,
+    // The scope index this definition belongs to
+    scope_index: usize,
     children: Option<Vec<Definition>>,
 }
 
@@ -227,6 +292,7 @@ impl Definition {
         location: Location,
         kind: SymbolKind,
         top_level: bool,
+        scope_index: usize,
         children: Vec<Definition>,
     ) -> Self {
         Self {
@@ -234,6 +300,7 @@ impl Definition {
             id,
             kind,
             top_level,
+            scope_index,
             children: if children.is_empty() {
                 None
             } else {
@@ -290,6 +357,10 @@ struct SourceInfoBuilder<'i> {
     // All references that have been found in the file.
     // The references get added as soon as they're encountered in the AST, so they're always sorted.
     references: Vec<Reference>,
+    // All scopes found in the file
+    scopes: Vec<ScopeInfo>,
+    // Current scope index stack (for nested scopes)
+    scope_stack: Vec<usize>,
 }
 
 impl<'i> SourceInfoBuilder<'i> {
@@ -301,7 +372,26 @@ impl<'i> SourceInfoBuilder<'i> {
             frames: Vec::new(),
             definitions: Vec::new(),
             references: Vec::new(),
+            scopes: Vec::new(),
+            scope_stack: Vec::new(),
         };
+
+        // Add global scope
+        result.scopes.push(ScopeInfo {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: u32::MAX,
+                    character: u32::MAX,
+                },
+            },
+            kind: ScopeKind::Global,
+            parent_scope: None,
+        });
+        result.scope_stack.push(0); // Start in global scope
 
         if let Some(entry_point) = ast.entry_point() {
             result.visit_node(entry_point, Context::new(ast));
@@ -325,6 +415,7 @@ impl<'i> SourceInfoBuilder<'i> {
             source: self.script,
             definitions: self.definitions,
             references: self.references,
+            scopes: self.scopes,
             error,
         }
     }
@@ -368,8 +459,16 @@ impl<'i> SourceInfoBuilder<'i> {
             | Node::Tuple {
                 elements: nodes, ..
             }
-            | Node::TempTuple(nodes)
-            | Node::Block(nodes) => self.visit_nested(nodes, ctx.default()),
+            | Node::TempTuple(nodes) => self.visit_nested(nodes, ctx.default()),
+            Node::Block(nodes) => {
+                let block_span = *ctx.ast.span(node_index);
+                let block_range = koto_span_to_lsp_range(block_span);
+                let _scope_index = self.push_scope(block_range, ScopeKind::Block);
+
+                self.visit_nested(nodes, ctx.default());
+
+                self.pop_scope();
+            }
             // Nodes with an optional child node
             Node::Break(maybe_node) | Node::Return(maybe_node) => {
                 if let Some(node) = maybe_node {
@@ -405,10 +504,16 @@ impl<'i> SourceInfoBuilder<'i> {
                 self.pop_frame();
             }
             Node::Function(info) => {
+                let function_span = *ctx.ast.span(node_index);
+                let function_range = koto_span_to_lsp_range(function_span);
+                let _scope_index = self.push_scope(function_range, ScopeKind::Function);
+
                 self.push_frame(info.local_count);
                 self.visit_node(info.args, ctx.default());
                 self.visit_node(info.body, ctx.default());
                 self.pop_frame();
+
+                self.pop_scope();
             }
             Node::FunctionArgs { args, .. } => {
                 let definitions = &mut self.frame_mut().definitions;
@@ -557,7 +662,8 @@ impl<'i> SourceInfoBuilder<'i> {
                             Location::new(self.uri.clone(), *ctx.ast.span(key_node.span)),
                             SymbolKind::FIELD,
                             self.frames.len() == 1, // TODO - use frame.is_top_level?
-                            vec![],                 // TODO - nested child definitions?
+                            self.current_scope_index(),
+                            vec![], // TODO - nested child definitions?
                         ))
                     }
                 }
@@ -571,7 +677,8 @@ impl<'i> SourceInfoBuilder<'i> {
                         Location::new(self.uri.clone(), *ctx.ast.span(key_node.span)),
                         SymbolKind::FIELD,
                         self.frames.len() == 1, // TODO - use frame.is_top_level?
-                        vec![],                 // TODO - nested child definitions?
+                        self.current_scope_index(),
+                        vec![], // TODO - nested child definitions?
                     ))
                 }
                 _ => {}
@@ -904,11 +1011,34 @@ impl<'i> SourceInfoBuilder<'i> {
         self.frames.last_mut().expect("Missing frame")
     }
 
+    fn push_scope(&mut self, range: Range, kind: ScopeKind) -> usize {
+        let parent_scope = self.scope_stack.last().copied();
+        let scope_index = self.scopes.len();
+
+        self.scopes.push(ScopeInfo {
+            range,
+            kind,
+            parent_scope,
+        });
+
+        self.scope_stack.push(scope_index);
+        scope_index
+    }
+
+    fn pop_scope(&mut self) {
+        self.scope_stack.pop();
+    }
+
+    fn current_scope_index(&self) -> usize {
+        *self.scope_stack.last().unwrap_or(&0)
+    }
+
     fn push_frame(&mut self, locals_capacity: usize) {
         self.frames.push(Frame {
             definitions: Vec::with_capacity(locals_capacity),
             imported_definitions: Vec::new(),
             top_level: self.frames.is_empty(),
+            scope_index: self.current_scope_index(),
         });
     }
 
@@ -923,6 +1053,7 @@ struct Frame {
     definitions: Vec<Definition>,
     imported_definitions: Vec<Definition>,
     top_level: bool,
+    scope_index: usize,
 }
 
 impl Frame {
@@ -938,6 +1069,7 @@ impl Frame {
             location,
             kind,
             self.top_level,
+            self.scope_index,
             children,
         ));
     }
@@ -1606,9 +1738,9 @@ g = f(1, 2)
             autocomplete_test(
                 script,
                 &[
-                    (position(1, 0), &["x"]), // Before function definition
-                    (position(2, 2), &["x", "f"]), // Inside function, parameters not visible due to simplified scope
-                    (position(4, 0), &["x", "f"]), // After function definition
+                    (position(1, 0), &["x"]),                // Before function definition
+                    (position(2, 2), &["x", "f", "a", "b"]), // Inside function, parameters are now visible
+                    (position(4, 0), &["x", "f"]), // After function definition, parameters not visible
                     (position(4, 10), &["x", "f", "g"]), // After g is defined
                 ],
             )
@@ -1625,7 +1757,7 @@ result = data.name
             autocomplete_test(
                 script,
                 &[
-                    (position(3, 0), &["data"]), // After map is defined
+                    (position(3, 0), &["data"]),            // After map is defined
                     (position(3, 20), &["data", "result"]), // After result is defined
                 ],
             )
@@ -1655,7 +1787,7 @@ x = foo + baz
             autocomplete_test(
                 script,
                 &[
-                    (position(1, 0), &["foo", "baz"]), // After imports
+                    (position(1, 0), &["foo", "baz"]),       // After imports
                     (position(1, 13), &["foo", "baz", "x"]), // After x is defined
                 ],
             )
@@ -1673,8 +1805,9 @@ result = f(10)(20)
             autocomplete_test(
                 script,
                 &[
-                    (position(2, 2), &["a", "f"]), // Inside function - simplified scope
-                    (position(4, 0), &["a", "f"]), // At start of result line, before result assignment
+                    (position(2, 2), &["a", "f", "x"]), // Inside function - parameters visible
+                    (position(3, 2), &["a", "f", "x", "b"]), // Inside nested function, outer scope visible
+                    (position(4, 0), &["a", "f"]), // At start of result line, local scope not visible
                     (position(4, 18), &["a", "f", "result"]), // After result is defined
                 ],
             )
@@ -1691,7 +1824,7 @@ export
             autocomplete_test(
                 script,
                 &[
-                    (position(1, 0), &["x"]), // Before export
+                    (position(1, 0), &["x"]),                   // Before export
                     (position(3, 10), &["x", "value", "name"]), // After export with fields
                 ],
             )
@@ -1710,12 +1843,170 @@ z = y + 1
             autocomplete_test(
                 script,
                 &[
-                    (position(2, 2), &["x"]), // Inside if block
-                    (position(4, 2), &["x", "y"]), // Inside else block - first y is visible
+                    (position(2, 2), &["x"]),           // Inside if block
+                    (position(4, 2), &["x", "y"]),      // Inside else block - first y is visible
                     (position(5, 0), &["x", "y"]), // After if/else - both y definitions are visible (last one wins)
                     (position(5, 9), &["x", "y", "z"]), // After z is defined
                 ],
             )
+        }
+
+        #[test]
+        fn complex_nested_scopes() -> Result<()> {
+            let script = "\
+outer_var = 42
+outer_func = |param1|
+  local_var = param1 * 2
+  inner_func = |param2|
+    inner_var = param2 + local_var + outer_var
+    inner_var
+  inner_func(10)
+
+another_top_level = 99
+";
+            autocomplete_test(
+                script,
+                &[
+                    (position(2, 2), &["outer_var", "outer_func", "param1"]), // Inside outer function
+                    (
+                        position(4, 4),
+                        &[
+                            "outer_var",
+                            "outer_func",
+                            "param1",
+                            "local_var",
+                            "inner_func",
+                            "param2",
+                        ],
+                    ), // Inside inner function
+                    (position(8, 0), &["outer_var", "outer_func"]), // After functions, local vars not visible
+                    (
+                        position(8, 20),
+                        &["outer_var", "outer_func", "another_top_level"],
+                    ), // After another_top_level
+                ],
+            )
+        }
+
+        #[test]
+        fn function_parameters_and_locals() -> Result<()> {
+            let script = "\
+global = 1
+func = |a, b, c|
+  x = a + b
+  y = c + global
+  z = x + y
+  z
+
+result = func(1, 2, 3)
+";
+            autocomplete_test(
+                script,
+                &[
+                    (position(2, 2), &["global", "func", "a", "b", "c"]), // Parameters visible
+                    (position(3, 2), &["global", "func", "a", "b", "c", "x"]), // Previous locals visible
+                    (position(4, 2), &["global", "func", "a", "b", "c", "x", "y"]), // All locals visible
+                    (position(7, 0), &["global", "func"]), // Outside function, locals not visible
+                    (position(7, 22), &["global", "func", "result"]), // After result defined
+                ],
+            )
+        }
+
+        #[test]
+        fn scope_boundaries() -> Result<()> {
+            let script = "\
+a = 1
+first_func = |x|
+  b = x + a
+  b
+
+c = 2
+second_func = |y|
+  d = y + c
+  d
+
+e = 3
+";
+            autocomplete_test(
+                script,
+                &[
+                    (position(2, 2), &["a", "first_func", "x"]), // Inside first function
+                    (position(6, 0), &["a", "first_func", "c"]), // Between functions
+                    (
+                        position(7, 2),
+                        &["a", "first_func", "c", "second_func", "y"],
+                    ), // Inside second function
+                    (
+                        position(10, 6),
+                        &["a", "first_func", "c", "second_func", "e"],
+                    ), // After e is completed
+                ],
+            )
+        }
+    }
+
+    mod ast_scope_tracking {
+        use super::*;
+
+        #[test]
+        fn test_ast_based_scope_tracking() {
+            let code = r#"
+x = 42
+
+f = |a| 
+  y = a + 1
+  inner = |b|
+    z = b + y
+    w = z + 1
+    w
+  inner(10)
+
+g = |c|
+  d = c * 2
+  d
+
+result = f(5) + g(3)
+"#;
+
+            let mut info_cache = InfoCache::default();
+            let source_info = SourceInfo::new(code.to_string(), test_uri(), &mut info_cache);
+
+            // Test autocomplete inside inner function (should see a, y, b, z, w, x, f, inner)
+            let inner_pos = Position {
+                line: 7,
+                character: 6,
+            };
+            let inner_completions: Vec<_> = source_info.get_autocomplete_items(inner_pos).collect();
+
+            // Test autocomplete inside g function (should see c, d, x, f, g but not y, z, w)
+            let g_pos = Position {
+                line: 12,
+                character: 6,
+            };
+            let g_completions: Vec<_> = source_info.get_autocomplete_items(g_pos).collect();
+
+            // Verify the inner function can see variables from parent scopes
+            assert!(inner_completions.iter().any(|c| c.id.as_str() == "a")); // from f function
+            assert!(inner_completions.iter().any(|c| c.id.as_str() == "y")); // from f function  
+            assert!(inner_completions.iter().any(|c| c.id.as_str() == "b")); // from inner function
+            assert!(inner_completions.iter().any(|c| c.id.as_str() == "z")); // from inner function
+            assert!(inner_completions.iter().any(|c| c.id.as_str() == "w")); // from inner function
+            assert!(inner_completions.iter().any(|c| c.id.as_str() == "x")); // global
+            assert!(inner_completions.iter().any(|c| c.id.as_str() == "f")); // global
+            assert!(inner_completions.iter().any(|c| c.id.as_str() == "inner")); // from f function
+
+            // Verify g function can see local and global variables but not f function variables
+            assert!(g_completions.iter().any(|c| c.id.as_str() == "c")); // from g function
+            assert!(g_completions.iter().any(|c| c.id.as_str() == "d")); // from g function
+            assert!(g_completions.iter().any(|c| c.id.as_str() == "x")); // global
+            assert!(g_completions.iter().any(|c| c.id.as_str() == "f")); // global
+            assert!(g_completions.iter().any(|c| c.id.as_str() == "g")); // global
+            assert!(!g_completions.iter().any(|c| c.id.as_str() == "a")); // not from f function
+            assert!(!g_completions.iter().any(|c| c.id.as_str() == "y")); // not from f function
+            assert!(!g_completions.iter().any(|c| c.id.as_str() == "inner")); // not from f function
+            assert!(!g_completions.iter().any(|c| c.id.as_str() == "b")); // not from inner function
+            assert!(!g_completions.iter().any(|c| c.id.as_str() == "z")); // not from inner function
+            assert!(!g_completions.iter().any(|c| c.id.as_str() == "w")); // not from inner function
         }
     }
 }
