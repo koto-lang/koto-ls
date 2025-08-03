@@ -133,6 +133,12 @@ impl SourceInfo {
             .iter()
             .filter(|definition| definition.top_level)
     }
+
+    pub fn get_autocomplete_items(&self, position: Position) -> impl Iterator<Item = &Definition> {
+        self.definitions.iter().filter(move |definition| {
+            definition.location.range.end <= position && definition.top_level
+        })
+    }
 }
 
 /// A location in a source file, identified by [Url] and [Range]
@@ -1529,6 +1535,186 @@ x =
                         definition(range(2, 2, 1), "b", SymbolKind::FIELD, &[]),
                     ],
                 )],
+            )
+        }
+    }
+
+    mod autocomplete {
+        use super::*;
+
+        fn autocomplete_test(script: &str, cases: &[(Position, &[&str])]) -> Result<()> {
+            let mut info_cache = InfoCache::default();
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
+
+            for (i, (position, expected_names)) in cases.iter().enumerate() {
+                let items: Vec<_> = info.get_autocomplete_items(*position).collect();
+                let actual_names: Vec<_> = items.iter().map(|def| def.id.as_str()).collect();
+
+                for (j, expected_name) in expected_names.iter().enumerate() {
+                    if j >= actual_names.len() {
+                        panic!(
+                            "mismatch in case {i}: expected '{expected_name}' but ran out of items"
+                        );
+                    }
+                    if !actual_names.contains(expected_name) {
+                        panic!(
+                            "mismatch in case {i}: expected '{expected_name}' but found {actual_names:?}"
+                        );
+                    }
+                }
+
+                // Check that we don't have extra unexpected items
+                for actual_name in &actual_names {
+                    if !expected_names.contains(actual_name) {
+                        panic!(
+                            "mismatch in case {i}: unexpected item '{actual_name}' in {actual_names:?}",
+                        );
+                    }
+                }
+            }
+
+            Ok(())
+        }
+
+        #[test]
+        fn basic_variables() -> Result<()> {
+            let script = "\
+a = 42
+b = 99
+c = a + b
+";
+            autocomplete_test(
+                script,
+                &[
+                    (position(0, 6), &["a"]), // At end of first line, 'a' should be available
+                    (position(1, 0), &["a"]), // At start of second line, 'a' is available
+                    (position(2, 0), &["a", "b"]), // After 'a' and 'b' are defined
+                    (position(2, 10), &["a", "b", "c"]), // After all are defined
+                ],
+            )
+        }
+
+        #[test]
+        fn function_parameters() -> Result<()> {
+            let script = "\
+x = 42
+f = |a, b|
+  y = a + b + x
+  y
+g = f(1, 2)
+";
+            autocomplete_test(
+                script,
+                &[
+                    (position(1, 0), &["x"]), // Before function definition
+                    (position(2, 2), &["x", "f"]), // Inside function, parameters not visible due to simplified scope
+                    (position(4, 0), &["x", "f"]), // After function definition
+                    (position(4, 10), &["x", "f", "g"]), // After g is defined
+                ],
+            )
+        }
+
+        #[test]
+        fn map_assignments() -> Result<()> {
+            let script = "\
+data = 
+  name: \"test\"
+  value: 42
+result = data.name
+";
+            autocomplete_test(
+                script,
+                &[
+                    (position(3, 0), &["data"]), // After map is defined
+                    (position(3, 20), &["data", "result"]), // After result is defined
+                ],
+            )
+        }
+
+        #[test]
+        fn multi_assignment() -> Result<()> {
+            let script = "\
+a, b, c = 1, 2, 3
+sum = a + b + c
+";
+            autocomplete_test(
+                script,
+                &[
+                    (position(1, 0), &["a", "b", "c"]), // After multi-assignment
+                    (position(1, 15), &["a", "b", "c", "sum"]), // After sum is defined
+                ],
+            )
+        }
+
+        #[test]
+        fn import_statements() -> Result<()> {
+            let script = "\
+import foo, bar as baz
+x = foo + baz
+";
+            autocomplete_test(
+                script,
+                &[
+                    (position(1, 0), &["foo", "baz"]), // After imports
+                    (position(1, 13), &["foo", "baz", "x"]), // After x is defined
+                ],
+            )
+        }
+
+        #[test]
+        fn nested_scopes_simplified() -> Result<()> {
+            let script = "\
+a = 1
+f = |x|
+  b = 2
+  |y| x + y + a + b
+result = f(10)(20)
+";
+            autocomplete_test(
+                script,
+                &[
+                    (position(2, 2), &["a", "f"]), // Inside function - simplified scope
+                    (position(4, 0), &["a", "f"]), // At start of result line, before result assignment
+                    (position(4, 18), &["a", "f", "result"]), // After result is defined
+                ],
+            )
+        }
+
+        #[test]
+        fn export_statements() -> Result<()> {
+            let script = "\
+x = 42
+export
+  value: x
+  name: \"test\"
+";
+            autocomplete_test(
+                script,
+                &[
+                    (position(1, 0), &["x"]), // Before export
+                    (position(3, 10), &["x", "value", "name"]), // After export with fields
+                ],
+            )
+        }
+
+        #[test]
+        fn control_flow() -> Result<()> {
+            let script = "\
+x = 10
+if x > 5
+  y = x * 2
+else
+  y = x / 2
+z = y + 1
+";
+            autocomplete_test(
+                script,
+                &[
+                    (position(2, 2), &["x"]), // Inside if block
+                    (position(4, 2), &["x", "y"]), // Inside else block - first y is visible
+                    (position(5, 0), &["x", "y"]), // After if/else - both y definitions are visible (last one wins)
+                    (position(5, 9), &["x", "y", "z"]), // After z is defined
+                ],
             )
         }
     }

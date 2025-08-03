@@ -1,13 +1,12 @@
 use crate::info_cache::InfoCache;
 use crate::source_info::SourceInfo;
-use crate::utils::{default, koto_span_to_lsp_range};
+use crate::utils::{default, koto_span_to_lsp_range, symbol_kind_to_completion_item_kind};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp_server::jsonrpc::{Error, Result};
 use tower_lsp_server::lsp_types::*;
 use tower_lsp_server::{Client, LanguageServer};
-
 pub struct KotoServer {
     client: Client,
     source_info: Arc<Mutex<InfoCache>>,
@@ -80,6 +79,10 @@ impl LanguageServer for KotoServer {
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
                 document_formatting_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
+                    ..default()
+                }),
                 ..default()
             },
         })
@@ -350,6 +353,31 @@ impl LanguageServer for KotoServer {
             Ok(Some(result))
         } else {
             Err(Error::invalid_params("No source info for file"))
+        }
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let info_cache = self.source_info.lock().await;
+        if let Some(source_info) = info_cache.get(&uri) {
+            let completion_items: Vec<CompletionItem> = source_info
+                .get_autocomplete_items(position)
+                .map(|definition| CompletionItem {
+                    label: definition.id.as_str().to_string(),
+                    label_details: Some(CompletionItemLabelDetails {
+                        description: Some(format!("{:?}", definition.kind)),
+                        ..default()
+                    }),
+                    kind: Some(symbol_kind_to_completion_item_kind(definition.kind)),
+                    ..default()
+                })
+                .collect();
+
+            Ok(Some(CompletionResponse::Array(completion_items)))
+        } else {
+            Ok(None)
         }
     }
 }
