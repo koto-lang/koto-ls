@@ -512,8 +512,6 @@ impl<'i> SourceInfoBuilder<'i> {
             | Node::Self_
             | Node::Type { .. }
             | Node::Ignored(..) => {}
-            // Map entries are visited in visit_map
-            Node::MapEntry(..) => {}
             // Nodes with a single child node that should be visited
             Node::Nested(node)
             | Node::RangeFrom { start: node }
@@ -542,7 +540,7 @@ impl<'i> SourceInfoBuilder<'i> {
                 }
             }
             Node::Id(id, _type_hint) => {
-                if ctx.id_is_definition {
+                if ctx.is_lhs() {
                     self.add_definition(
                         ctx.string(*id),
                         SymbolKind::VARIABLE,
@@ -564,6 +562,15 @@ impl<'i> SourceInfoBuilder<'i> {
                 self.visit_node(*end, ctx.default());
             }
             Node::Map { entries, .. } => child_definitions = self.visit_map(entries, &ctx),
+            // Entries are visited in `visit_map_definition`, or in `visit_destructured_map`
+            Node::MapEntry(..) => {}
+            // Map patterns and key rebinds are visited in TODO
+            Node::MapPattern { entries, .. } => {
+                self.visit_nested(&entries, ctx.lhs());
+            }
+            Node::MapKeyRebind { id_or_ignored, .. } => {
+                self.visit_node(*id_or_ignored, ctx);
+            }
             Node::MainBlock { body, local_count } => {
                 self.push_frame(*local_count, ctx.ast, node);
                 self.visit_nested(body, ctx.default());
@@ -576,12 +583,11 @@ impl<'i> SourceInfoBuilder<'i> {
                 self.pop_frame();
             }
             Node::FunctionArgs { args, .. } => {
-                self.visit_nested(args, ctx.with_ids_as_definitions());
+                self.visit_nested(args, ctx.lhs());
             }
             Node::Import { from, items } => self.visit_import(from, items, &ctx),
             Node::Export(item) => {
-                // Set id_is_definition to true to count exported map keys as definitions
-                self.visit_node(*item, ctx.with_ids_as_definitions());
+                self.visit_node(*item, ctx.export());
             }
             Node::Assign {
                 target, expression, ..
@@ -592,7 +598,7 @@ impl<'i> SourceInfoBuilder<'i> {
                 ..
             } => {
                 self.visit_node(*expression, ctx.default());
-                self.visit_nested(targets, ctx.with_ids_as_definitions());
+                self.visit_nested(targets, ctx.lhs());
             }
             Node::BinaryOp { lhs, rhs, .. } => {
                 self.visit_node(*lhs, ctx.default());
@@ -621,7 +627,7 @@ impl<'i> SourceInfoBuilder<'i> {
                 expression,
             } => {
                 for pattern in patterns.iter() {
-                    self.visit_node(*pattern, ctx.with_ids_as_definitions());
+                    self.visit_node(*pattern, ctx.lhs());
                 }
                 if let Some(condition) = condition {
                     self.visit_node(*condition, ctx.default());
@@ -644,7 +650,7 @@ impl<'i> SourceInfoBuilder<'i> {
             }
             Node::PackedId(maybe_id) => {
                 if let Some(id) = maybe_id
-                    && ctx.id_is_definition
+                    && ctx.is_lhs()
                 {
                     self.add_definition(
                         ctx.string(*id),
@@ -656,7 +662,7 @@ impl<'i> SourceInfoBuilder<'i> {
                 }
             }
             Node::For(info) => {
-                self.visit_nested(&info.args, ctx.with_ids_as_definitions());
+                self.visit_nested(&info.args, ctx.lhs());
                 self.visit_node(info.iterable, ctx.default());
                 self.visit_node(info.body, ctx.default());
             }
@@ -667,7 +673,7 @@ impl<'i> SourceInfoBuilder<'i> {
             Node::Try(info) => {
                 self.visit_node(info.try_block, ctx.default());
                 for catch_block in &info.catch_blocks {
-                    self.visit_node(catch_block.arg, ctx.with_ids_as_definitions());
+                    self.visit_node(catch_block.arg, ctx.lhs());
                     self.visit_node(catch_block.block, ctx.default());
                 }
                 if let Some(finally_block) = info.finally_block {
@@ -692,8 +698,14 @@ impl<'i> SourceInfoBuilder<'i> {
             let entry_node = ctx.node(*entry);
             let (key_node, value) = match &entry_node.node {
                 Node::Id(..) => (entry_node, None),
+                // Only found in destructured maps, e.g. `{x, y} = f()`.
+                Node::MapKeyRebind { id_or_ignored, .. } => (ctx.node(*id_or_ignored), None),
                 Node::MapEntry(key, value) => (ctx.node(*key), Some(*value)),
-                _ => continue,
+                _ => {
+                    // We shouldn't get here in well structured ASTs
+                    debug_assert!(false);
+                    continue;
+                }
             };
 
             match &key_node.node {
@@ -705,11 +717,16 @@ impl<'i> SourceInfoBuilder<'i> {
                     }
 
                     // Count the map key as a top-level definition?
-                    // id_is_definition will be true when exporting a map.
-                    if ctx.id_is_definition {
+                    // id_is_definition will be true when exporting a map,
+                    // or when a map is being destructured.
+                    if ctx.is_lhs() || ctx.is_export() {
                         self.add_definition(
                             ctx.string(*id),
-                            SymbolKind::FIELD,
+                            if ctx.is_export() {
+                                SymbolKind::FIELD
+                            } else {
+                                SymbolKind::VARIABLE
+                            },
                             vec![],
                             key_node,
                             ctx.ast,
@@ -721,7 +738,7 @@ impl<'i> SourceInfoBuilder<'i> {
                             SymbolKind::FIELD,
                             vec![],                  // TODO - nested child definitions?
                             self.current_frame_id(), // Use the current frame id
-                        ))
+                        ));
                     }
                 }
                 Node::Meta(key_id, maybe_name) => {
@@ -735,10 +752,15 @@ impl<'i> SourceInfoBuilder<'i> {
                         SymbolKind::FIELD,
                         vec![],                  // TODO - nested child definitions?
                         self.current_frame_id(), // Use the current frame id
-                    ))
+                    ));
+                }
+                Node::MapKeyRebind { id_or_ignored, .. } => {
+                    print!("rebind!");
+                    self.visit_node(*id_or_ignored, ctx.lhs());
                 }
                 _ => {}
             }
+
             if let Some(value) = value {
                 self.visit_node(value, ctx.default());
             }
@@ -965,7 +987,7 @@ impl<'i> SourceInfoBuilder<'i> {
             }
             _ => {
                 // Visit the LHS first to keep references in order
-                self.visit_node(target, ctx.default());
+                self.visit_node(target, ctx.lhs());
                 self.visit_node(expression, ctx.default());
             }
         }
@@ -1168,32 +1190,51 @@ pub struct Frame {
     pub definitions: Vec<DefinitionId>,
 }
 
+#[derive(Clone, Copy)]
+enum ExpressionKind {
+    Default,
+    Lhs,
+    Export,
+}
+
 #[derive(Clone)]
 struct Context<'a> {
     ast: &'a Ast,
-    id_is_definition: bool,
+    expression_kind: ExpressionKind,
 }
 
 impl<'a> Context<'a> {
     fn new(ast: &'a Ast) -> Self {
         Self {
             ast,
-            id_is_definition: false,
+            expression_kind: ExpressionKind::Default,
         }
     }
 
     fn default(&self) -> Self {
+        Self::new(self.ast)
+    }
+
+    fn lhs(&self) -> Self {
         Self {
             ast: self.ast,
-            id_is_definition: false,
+            expression_kind: ExpressionKind::Lhs,
         }
     }
 
-    fn with_ids_as_definitions(&self) -> Self {
+    fn export(&self) -> Self {
         Self {
             ast: self.ast,
-            id_is_definition: true,
+            expression_kind: ExpressionKind::Export,
         }
+    }
+
+    fn is_lhs(&self) -> bool {
+        matches!(self.expression_kind, ExpressionKind::Lhs)
+    }
+
+    fn is_export(&self) -> bool {
+        matches!(self.expression_kind, ExpressionKind::Export)
     }
 
     fn node(&self, index: AstIndex) -> &AstNode {
@@ -1328,11 +1369,13 @@ f a
 
         #[test]
         fn fib() -> Result<()> {
-            let script = r#"fib = |nf|
+            let script = "\
+fib = |nf|
     switch
         nf <= 0 then 0
         nf == 1 then 1
-        else (fib nf - 1) + (fib nf - 2)"#;
+        else (fib nf - 1) + (fib nf - 2)
+";
 
             goto_definition_test(
                 script,
@@ -1350,6 +1393,58 @@ f a
                     (position(2, 12), None), // <= operator
                 ],
             )
+        }
+
+        mod destructured_map {
+            use super::*;
+
+            #[test]
+            fn chained_destructure() -> Result<()> {
+                let script = "\
+{x} = {y as z} = {x: 1, y: 2}
+x + z
+";
+                goto_definition_test(
+                    script,
+                    &[
+                        (position(1, 0), Some(range(0, 1, 1))),  // x
+                        (position(1, 4), Some(range(0, 12, 1))), // z
+                        (position(1, 2), None),
+                    ],
+                )
+            }
+
+            #[test]
+            fn for_loop() -> Result<()> {
+                let script = "\
+for {x, y} in f()
+  x + y
+";
+                goto_definition_test(
+                    script,
+                    &[
+                        (position(1, 2), Some(range(0, 5, 1))), // x
+                        (position(1, 6), Some(range(0, 8, 1))), // y
+                        (position(1, 4), None),
+                    ],
+                )
+            }
+
+            #[test]
+            fn match_arm() -> Result<()> {
+                let script = "\
+x = 42
+match f()
+  {x} then x
+";
+                goto_definition_test(
+                    script,
+                    &[
+                        (position(2, 11), Some(range(2, 3, 1))), // x
+                        (position(1, 4), None),
+                    ],
+                )
+            }
         }
     }
 
@@ -1754,6 +1849,7 @@ bar = |n|
   x * x
 
 x, y, z = f()
+{x as b} = {x: 99}
 ";
             top_level_definitions_test(
                 script,
@@ -1764,6 +1860,7 @@ x, y, z = f()
                     definition(range(7, 0, 1), "x", SymbolKind::VARIABLE, &[]),
                     definition(range(7, 3, 1), "y", SymbolKind::VARIABLE, &[]),
                     definition(range(7, 6, 1), "z", SymbolKind::VARIABLE, &[]),
+                    definition(range(8, 6, 1), "b", SymbolKind::VARIABLE, &[]),
                 ],
             )
         }
