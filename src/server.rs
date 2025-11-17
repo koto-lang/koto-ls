@@ -334,6 +334,7 @@ impl LanguageServer for KotoServer {
                 return Err(Error::invalid_params("No reference found at position"));
             };
 
+            #[allow(clippy::mutable_key_type)]
             let mut changes = HashMap::new();
             for reference in references {
                 changes

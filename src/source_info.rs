@@ -566,7 +566,7 @@ impl<'i> SourceInfoBuilder<'i> {
             Node::MapEntry(..) => {}
             // Map patterns and key rebinds are visited in TODO
             Node::MapPattern { entries, .. } => {
-                self.visit_nested(&entries, ctx.lhs());
+                self.visit_nested(entries, ctx.lhs());
             }
             Node::MapKeyRebind { id_or_ignored, .. } => {
                 self.visit_node(*id_or_ignored, ctx);
