@@ -1,0 +1,3 @@
+from config import modes, ui
+modes.normal = {}
+ui.goto_word = {}

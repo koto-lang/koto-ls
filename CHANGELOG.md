@@ -8,6 +8,10 @@ The Koto project adheres to
 
 ## [0.17.0] Unreleased
 
+### Fixed
+
+- Fixed a stack overflow caused by modules recursively importing each other.
+
 ## [0.16.1] 2025.07.31
 
 ### Fixed

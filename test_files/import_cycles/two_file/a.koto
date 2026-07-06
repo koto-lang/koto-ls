@@ -1,0 +1,2 @@
+from b import y
+x = 1

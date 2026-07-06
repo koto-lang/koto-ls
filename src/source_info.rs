@@ -53,8 +53,16 @@ pub struct SourceInfo {
 }
 
 impl SourceInfo {
-    /// Returns a [SourceInfo] containing the result of analyzing the given script
-    pub fn new(script: String, uri: Arc<Uri>, info_cache: &mut InfoCache) -> Self {
+    /// Returns a [SourceInfo] containing the result of analyzing the given script.
+    ///
+    /// If the script is already being analyzed (based on its URI), then analysis is skipped and
+    /// `None` is returned.
+    pub fn new(script: String, uri: Arc<Uri>, info_cache: &mut InfoCache) -> Option<Self> {
+        let Some(mut info_cache) = info_cache.begin_analysis(uri.clone()) else {
+            // The script is already being analyzed, break out to avoid infinite recursion.
+            return None;
+        };
+
         let mut error = None;
         let ast = match Parser::parse(&script) {
             Ok(ast) => ast,
@@ -63,19 +71,21 @@ impl SourceInfo {
                     error = Some(parse_error.into());
                     *ast
                 } else {
-                    return Self {
+                    return Some(Self {
                         error: Some(parse_error.into()),
-                        ..Default::default()
-                    };
+                        ..Self::default()
+                    });
                 }
             }
         };
+
         if error.is_none()
             && let Err(compile_error) = Compiler::compile_ast(ast.clone(), None, default())
         {
             error = Some(compile_error.into())
         }
-        SourceInfoBuilder::from_ast(&ast, script, uri, info_cache).build(error)
+
+        Some(SourceInfoBuilder::from_ast(&ast, script, uri, &mut info_cache).build(error))
     }
 
     pub fn source(&self) -> &str {
@@ -947,8 +957,9 @@ impl<'i> SourceInfoBuilder<'i> {
         let Ok(script) = fs::read_to_string(&path) else {
             return;
         };
-        let info = SourceInfo::new(script, url.clone(), self.info_cache);
-        self.info_cache.insert(url, modified_time.into(), info);
+        if let Some(info) = SourceInfo::new(script, url.clone(), self.info_cache) {
+            self.info_cache.insert(url, modified_time.into(), info);
+        }
     }
 
     fn visit_assign(&mut self, target: AstIndex, expression: AstIndex, ctx: &Context) {
@@ -1303,7 +1314,7 @@ mod test {
 
         fn goto_definition_test(script: &str, cases: &[(Position, Option<Range>)]) -> Result<()> {
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache).unwrap();
 
             for (i, (position, expected)) in cases.iter().enumerate() {
                 let result = info.get_definition_location(*position);
@@ -1456,7 +1467,7 @@ match f()
             cases: &[(Position, Option<&[Range]>, bool)],
         ) -> Result<()> {
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache).unwrap();
 
             for (i, (position, expected_references, include_definition)) in cases.iter().enumerate()
             {
@@ -1778,7 +1789,7 @@ x = |y| y.baz = bar
             expected_definitions: &[TestDefinition],
         ) -> Result<()> {
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache).unwrap();
             let definitions = info.top_level_definitions().collect::<Vec<_>>();
 
             for (i, (expected, actual)) in expected_definitions
@@ -1924,6 +1935,86 @@ x =
         }
     }
 
+    mod import_cycles {
+        use super::*;
+        use std::{
+            collections::HashSet,
+            fs,
+            path::{Path, PathBuf},
+        };
+
+        fn test_file(path: &str) -> PathBuf {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("test_files")
+                .join(path)
+        }
+
+        fn file_uri(path: &Path) -> Arc<Uri> {
+            Arc::new(Uri::from_file_path(fs::canonicalize(path).unwrap()).unwrap())
+        }
+
+        fn analysis_is_not_in_progress(info_cache: &mut InfoCache, uri: &Arc<Uri>) -> bool {
+            info_cache.begin_analysis(uri.clone()).is_some()
+        }
+
+        fn assert_top_level_definitions_contain(info: &SourceInfo, expected: &[&str]) {
+            let definitions = info
+                .top_level_definitions()
+                .map(|definition| definition.id.as_str())
+                .collect::<HashSet<_>>();
+
+            for expected in expected {
+                assert!(
+                    definitions.contains(expected),
+                    "missing top-level definition {expected}"
+                );
+            }
+        }
+
+        #[test]
+        fn module_that_imports_itself() {
+            let config_path = test_file("import_cycles/self/config.koto");
+            let script = fs::read_to_string(&config_path).unwrap();
+
+            let mut info_cache = InfoCache::default();
+            let uri = file_uri(&config_path);
+            let info = SourceInfo::new(script.to_string(), uri.clone(), &mut info_cache).unwrap();
+
+            assert!(info.error.is_none(), "{:?}", info.error);
+            assert!(analysis_is_not_in_progress(&mut info_cache, &uri));
+            assert_top_level_definitions_contain(&info, &["modes", "ui"]);
+        }
+
+        #[test]
+        fn two_files_importing_each_other() {
+            let a_path = test_file("import_cycles/two_file/a.koto");
+            let b_path = test_file("import_cycles/two_file/b.koto");
+            let a_script = fs::read_to_string(&a_path).unwrap();
+
+            let mut info_cache = InfoCache::default();
+            let a_uri = file_uri(&a_path);
+            let b_uri = file_uri(&b_path);
+            let info =
+                SourceInfo::new(a_script.to_string(), a_uri.clone(), &mut info_cache).unwrap();
+
+            assert!(info.error.is_none(), "{:?}", info.error);
+            assert!(analysis_is_not_in_progress(&mut info_cache, &a_uri));
+            assert!(analysis_is_not_in_progress(&mut info_cache, &b_uri));
+            assert!(info_cache.get(&b_uri).is_some());
+            assert_top_level_definitions_contain(&info, &["x", "y"]);
+        }
+
+        #[test]
+        fn parse_error_clears_analysis_guard() {
+            let mut info_cache = InfoCache::default();
+            let uri = test_uri();
+            let info = SourceInfo::new("!".to_string(), uri.clone(), &mut info_cache).unwrap();
+
+            assert!(info.error.is_some());
+            assert!(analysis_is_not_in_progress(&mut info_cache, &uri));
+        }
+    }
+
     mod completions {
         use super::*;
 
@@ -1954,7 +2045,7 @@ v_x + v
 ";
 
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache).unwrap();
 
             let location = location_at_position(test_uri(), 3, 7);
             let completions = info.get_available_definitions_at_location(location);
@@ -1975,7 +2066,7 @@ v_foo = |v_a, v_b|
 ";
 
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache).unwrap();
 
             let location = location_at_position(test_uri(), 3, 22);
             let completions = info.get_available_definitions_at_location(location);
@@ -1995,7 +2086,7 @@ v_f = |v_x|
 ";
 
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache).unwrap();
 
             let location = location_at_position(test_uri(), 5, 36);
             let completions = info.get_available_definitions_at_location(location);
@@ -2017,7 +2108,7 @@ v_g = |v_other_param|
 ";
 
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache).unwrap();
 
             let location = location_at_position(test_uri(), 6, 34);
             let completions = info.get_available_definitions_at_location(location);
@@ -2041,7 +2132,7 @@ v_f = |v_a| v_a * 2
 ";
 
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache).unwrap();
 
             let location = location_at_position(test_uri(), 3, 0);
             let completions = info.get_available_definitions_at_location(location);
@@ -2055,7 +2146,7 @@ v_f = |v_a| v_a * 2
             let script = "";
 
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache).unwrap();
 
             let location = location_at_position(test_uri(), 0, 0);
             let completions = info.get_available_definitions_at_location(location);
@@ -2073,7 +2164,7 @@ v_f = |v_x|
 ";
 
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache).unwrap();
 
             let location = location_at_position(test_uri(), 3, 9);
             let completions = info.get_available_definitions_at_location(location);
@@ -2100,7 +2191,7 @@ v_foo + v_baz + v
 ";
 
             let mut info_cache = InfoCache::default();
-            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache);
+            let info = SourceInfo::new(script.to_string(), test_uri(), &mut info_cache).unwrap();
 
             let location = location_at_position(test_uri(), 3, 17);
             let completions = info.get_available_definitions_at_location(location);

@@ -34,7 +34,9 @@ impl KotoServer {
 
         let uri_arc = Arc::new(uri.clone());
         let mut info_cache = self.source_info.lock().await;
-        let info = SourceInfo::new(script, uri_arc.clone(), &mut info_cache);
+        let Some(info) = SourceInfo::new(script, uri_arc.clone(), &mut info_cache) else {
+            return;
+        };
 
         let diagnostics = if let Some(error) = &info.error {
             if let Some(span) = error.span() {

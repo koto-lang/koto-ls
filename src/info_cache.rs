@@ -1,5 +1,10 @@
 use crate::source_info::SourceInfo;
-use std::{collections::HashMap, sync::Arc, time::SystemTime};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::{Deref, DerefMut},
+    sync::Arc,
+    time::SystemTime,
+};
 use tower_lsp_server::lsp_types::Uri;
 
 /// A cache of analyzed sources
@@ -9,9 +14,30 @@ use tower_lsp_server::lsp_types::Uri;
 #[derive(Default, Debug)]
 pub struct InfoCache {
     entries: HashMap<Arc<Uri>, Info>,
+    // Sources that are currently being analyzed, used to prevent recursive analysis.
+    in_progress: HashSet<Arc<Uri>>,
 }
 
 impl InfoCache {
+    /// Marks a source URI as currently being analyzed.
+    ///
+    /// Returns an [AnalysisGuard] when the URI wasn't already in progress,
+    /// or `None` if analysis for the URI is already in progress.
+    pub fn begin_analysis(&mut self, url: Arc<Uri>) -> Option<AnalysisGuard<'_>> {
+        if self.in_progress.insert(url.clone()) {
+            Some(AnalysisGuard {
+                info_cache: self,
+                url,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn end_analysis(&mut self, url: &Uri) {
+        self.in_progress.remove(url);
+    }
+
     pub fn insert(&mut self, url: Arc<Uri>, version: Version, info: SourceInfo) {
         self.entries.insert(
             url,
@@ -31,6 +57,34 @@ impl InfoCache {
             Some(info) if info.version == version => Some(info.info.clone()),
             _ => None,
         }
+    }
+}
+
+/// Scoped helper returned by [InfoCache::begin_analysis].
+///
+/// The helper automatically calls [InfoCache::end_analysis] for the URI when dropped.
+pub struct AnalysisGuard<'a> {
+    info_cache: &'a mut InfoCache,
+    url: Arc<Uri>,
+}
+
+impl Deref for AnalysisGuard<'_> {
+    type Target = InfoCache;
+
+    fn deref(&self) -> &Self::Target {
+        self.info_cache
+    }
+}
+
+impl DerefMut for AnalysisGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.info_cache
+    }
+}
+
+impl Drop for AnalysisGuard<'_> {
+    fn drop(&mut self) {
+        self.info_cache.end_analysis(&self.url);
     }
 }
 
